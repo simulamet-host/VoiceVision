@@ -1,0 +1,86 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Model weights (can be large)
+weights/*.model
+weights/*.pth
+*.model
+*.pth
+
+# Task output directories
+task/*/
+!task/.gitkeep
+
+# Temporary files
+*.ts
+temp_*.mp4
+temp_*.aac
+*.wav
+*.mp4
+*.avi
+*.m4a
+
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# macOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Editor directories and files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# Environments
+.env
+.venv
+env/
+
+# Distribution / packaging
+.Python
+env/
+build/
+develop-eggs/
+dist/
+
+# Data files
+data/
+datasets/
+*.csv
+*.json
+*.npy
+*.npz 
