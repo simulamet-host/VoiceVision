@@ -1,0 +1,628 @@
+{% extends "base.html" %}
+
+{% block head %}
+<style>
+    #drop-area {
+        border: 2px dashed #ccc;
+        border-radius: 20px;
+        padding: 50px;
+        text-align: center;
+        background-color: #f8f9fa;
+        transition: all 0.3s;
+    }
+    #drop-area.highlight {
+        border-color: #0d6efd;
+        background-color: rgba(13, 110, 253, 0.1);
+    }
+    .preview-container {
+        max-width: 100%;
+        margin-top: 20px;
+        display: none;
+    }
+    #upload-progress {
+        display: none;
+        margin-top: 20px;
+    }
+    .ratio-option {
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    .ratio-option:hover {
+        transform: scale(1.05);
+    }
+    .ratio-option.selected {
+        border: 2px solid #0d6efd;
+    }
+    .aspect-ratio-container {
+        position: relative;
+        overflow: hidden;
+        width: 100%;
+        border-radius: 8px;
+        background-color: #e9ecef;
+    }
+    .aspect-ratio-container .ratio-inner {
+        padding-top: 30px;
+        padding-bottom: 30px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        color: #6c757d;
+    }
+    .aspect-ratio-container.ratio-9-16 .ratio-inner {
+        padding-top: 177.78%; /* 16:9 aspect ratio */
+    }
+    .aspect-ratio-container.ratio-1-1 .ratio-inner {
+        padding-top: 100%; /* 1:1 aspect ratio */
+    }
+    .aspect-ratio-container.ratio-4-5 .ratio-inner {
+        padding-top: 125%; /* 4:5 aspect ratio */
+    }
+    .aspect-ratio-label {
+        position: absolute;
+        bottom: 10px;
+        left: 0;
+        right: 0;
+        text-align: center;
+        font-weight: bold;
+        color: #495057;
+    }
+    .hero-section {
+        background: linear-gradient(135deg, #4a6bff 0%, #6e30c9 100%);
+        color: white;
+        padding: 60px 0;
+        border-radius: 10px;
+        margin-bottom: 40px;
+    }
+    .feature-icon {
+        font-size: 2.5rem;
+        color: #4a6bff;
+        margin-bottom: 1rem;
+    }
+    #processing-status {
+        display: none;
+    }
+    #error-message {
+        display: none;
+    }
+    .step {
+        background: #f8f9fa;
+        border-radius: 10px;
+        padding: 20px;
+        margin-bottom: 20px;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+        transition: all 0.3s;
+    }
+    .step:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+    }
+    .step-number {
+        background: #0d6efd;
+        color: white;
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-right: 10px;
+    }
+    #url-panel .card {
+        border-radius: 20px;
+        border: 2px dashed #ccc;
+        background-color: #f8f9fa;
+        transition: all 0.3s;
+    }
+    #url-panel .card:hover {
+        border-color: #0d6efd;
+        background-color: rgba(13, 110, 253, 0.1);
+    }
+    #url-preview {
+        display: none;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="hero-section text-center">
+    <div class="container">
+        <h1 class="display-4 fw-bold">VoiceVision</h1>
+        <p class="lead">AI-powered smart video cropping that focuses on active speakers</p>
+    </div>
+</div>
+
+<div class="row mb-5">
+    <div class="col-md-4">
+        <div class="step d-flex flex-column align-items-center text-center">
+            <div class="d-flex align-items-center mb-3">
+                <div class="step-number">1</div>
+                <h3>Upload</h3>
+            </div>
+            <i class="fas fa-upload feature-icon"></i>
+            <p>Upload your video for processing using the secure drag-and-drop interface</p>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="step d-flex flex-column align-items-center text-center">
+            <div class="d-flex align-items-center mb-3">
+                <div class="step-number">2</div>
+                <h3>Analyze</h3>
+            </div>
+            <i class="fas fa-brain feature-icon"></i>
+            <p>Our AI detects speakers and analyzes who is talking throughout the video</p>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="step d-flex flex-column align-items-center text-center">
+            <div class="d-flex align-items-center mb-3">
+                <div class="step-number">3</div>
+                <h3>Export</h3>
+            </div>
+            <i class="fas fa-crop-alt feature-icon"></i>
+            <p>Download your video perfectly cropped to focus on the active speakers</p>
+        </div>
+    </div>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-body">
+        <h2 class="card-title text-center mb-4">Process Your Video</h2>
+        
+        <div id="upload-container">
+            <!-- Aspect ratio selection -->
+            <h5 class="mb-3">1. Select aspect ratio</h5>
+            <div class="row mb-4">
+                <div class="col-md-4">
+                    <div class="ratio-option selected" data-ratio="9:16">
+                        <div class="aspect-ratio-container ratio-9-16">
+                            <div class="ratio-inner">
+                                <i class="fas fa-mobile-alt fa-3x"></i>
+                            </div>
+                        </div>
+                        <p class="text-center mt-2">9:16 (Mobile)</p>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="ratio-option" data-ratio="1:1">
+                        <div class="aspect-ratio-container ratio-1-1">
+                            <div class="ratio-inner">
+                                <i class="fas fa-square fa-3x"></i>
+                            </div>
+                        </div>
+                        <p class="text-center mt-2">1:1 (Square)</p>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="ratio-option" data-ratio="4:5">
+                        <div class="aspect-ratio-container ratio-4-5">
+                            <div class="ratio-inner">
+                                <i class="fas fa-portrait fa-3x"></i>
+                            </div>
+                        </div>
+                        <p class="text-center mt-2">4:5 (Instagram)</p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Upload method selection tabs -->
+            <h5 class="mb-3">2. Choose video source</h5>
+            <ul class="nav nav-tabs mb-3" id="uploadTabs" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="upload-tab" data-bs-toggle="tab" data-bs-target="#upload-panel" type="button" role="tab" aria-controls="upload-panel" aria-selected="true">
+                        <i class="fas fa-upload me-2"></i>Upload Video
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="url-tab" data-bs-toggle="tab" data-bs-target="#url-panel" type="button" role="tab" aria-controls="url-panel" aria-selected="false">
+                        <i class="fas fa-link me-2"></i>Video URL
+                    </button>
+                </li>
+            </ul>
+            
+            <div class="tab-content mb-4" id="uploadTabsContent">
+                <!-- Upload area tab -->
+                <div class="tab-pane fade show active" id="upload-panel" role="tabpanel" aria-labelledby="upload-tab">
+                    <div id="drop-area" class="mb-4">
+                        <i class="fas fa-cloud-upload-alt fa-3x mb-3"></i>
+                        <h4>Drag & Drop Video</h4>
+                        <p>or</p>
+                        <label for="fileInput" class="btn btn-primary">Choose a Video</label>
+                        <input type="file" id="fileInput" style="display:none" accept="video/*">
+                        <p class="mt-2 text-muted">Supported formats: MP4, MOV, AVI, WebM</p>
+                        <p class="text-muted">Maximum size: 1 GB</p>
+                    </div>
+                </div>
+                
+                <!-- URL input tab -->
+                <div class="tab-pane fade" id="url-panel" role="tabpanel" aria-labelledby="url-tab">
+                    <div class="card p-4">
+                        <h4 class="mb-3">Enter Video URL</h4>
+                        <div class="form-group mb-3">
+                            <label for="videoUrl" class="form-label">Video URL</label>
+                            <input type="url" class="form-control" id="videoUrl" placeholder="https://example.com/video.mp4">
+                            <div class="form-text">Supported formats: MP4, M3U8 (HLS), etc.</div>
+                        </div>
+                        <div class="d-grid">
+                            <button id="url-submit-btn" class="btn btn-primary">
+                                <i class="fas fa-check-circle me-2"></i>Use This URL
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Upload progress -->
+            <div id="upload-progress" class="mb-4">
+                <div class="progress">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
+                </div>
+                <p class="text-center mt-2" id="upload-status">Uploading...</p>
+            </div>
+            
+            <!-- Preview container -->
+            <div class="preview-container text-center mb-4">
+                <h5>Video Preview</h5>
+                <div class="mb-3" id="url-preview">
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i>
+                        <span id="url-preview-text">Processing will begin when you click the button below.</span>
+                    </div>
+                </div>
+                <video id="preview-video" controls class="img-fluid rounded"></video>
+                <div class="mt-3">
+                    <button id="process-btn" class="btn btn-success"><i class="fas fa-play-circle me-2"></i>Start Processing</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Processing status -->
+        <div id="processing-status" class="text-center">
+            <h4 class="mb-3">Processing your video...</h4>
+            <div class="progress mb-3">
+                <div id="processing-progress-bar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
+            </div>
+            <p id="processing-step">Initializing...</p>
+            <div class="mt-4">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Error message -->
+        <div id="error-message" class="alert alert-danger text-center">
+            <i class="fas fa-exclamation-triangle me-2"></i>
+            <span id="error-text">An error occurred during processing.</span>
+            <div class="mt-3">
+                <button id="retry-btn" class="btn btn-outline-danger">Try Again</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Global variables
+    let selectedFile = null;
+    let selectedRatio = '9:16';
+    let currentTaskId = null;
+    let processingStatusInterval = null;
+    let videoUrl = null;
+    let videoSource = 'upload'; // 'upload' or 'url'
+    
+    // DOM elements
+    const dropArea = document.getElementById('drop-area');
+    const fileInput = document.getElementById('fileInput');
+    const uploadContainer = document.getElementById('upload-container');
+    const uploadProgress = document.getElementById('upload-progress');
+    const uploadProgressBar = document.querySelector('#upload-progress .progress-bar');
+    const uploadStatus = document.getElementById('upload-status');
+    const previewContainer = document.querySelector('.preview-container');
+    const previewVideo = document.getElementById('preview-video');
+    const urlPreview = document.getElementById('url-preview');
+    const urlPreviewText = document.getElementById('url-preview-text');
+    const processBtn = document.getElementById('process-btn');
+    const processingStatus = document.getElementById('processing-status');
+    const processingProgressBar = document.getElementById('processing-progress-bar');
+    const processingStep = document.getElementById('processing-step');
+    const errorMessage = document.getElementById('error-message');
+    const errorText = document.getElementById('error-text');
+    const retryBtn = document.getElementById('retry-btn');
+    const ratioOptions = document.querySelectorAll('.ratio-option');
+    const videoUrlInput = document.getElementById('videoUrl');
+    const urlSubmitBtn = document.getElementById('url-submit-btn');
+    
+    // Prevent default drag behaviors
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+        dropArea.addEventListener(eventName, preventDefaults, false);
+        document.body.addEventListener(eventName, preventDefaults, false);
+    });
+    
+    // Highlight drop area when drag over it
+    ['dragenter', 'dragover'].forEach(eventName => {
+        dropArea.addEventListener(eventName, highlight, false);
+    });
+    
+    // Remove highlight when drag leave
+    ['dragleave', 'drop'].forEach(eventName => {
+        dropArea.addEventListener(eventName, unhighlight, false);
+    });
+    
+    // Handle dropped files
+    dropArea.addEventListener('drop', handleDrop, false);
+    
+    // Handle file input change
+    fileInput.addEventListener('change', handleFiles, false);
+    
+    // Handle URL submit button
+    urlSubmitBtn.addEventListener('click', handleUrlSubmit, false);
+    
+    // Handle aspect ratio selection
+    ratioOptions.forEach(option => {
+        option.addEventListener('click', () => {
+            ratioOptions.forEach(opt => opt.classList.remove('selected'));
+            option.classList.add('selected');
+            selectedRatio = option.getAttribute('data-ratio');
+        });
+    });
+    
+    // Process button click
+    processBtn.addEventListener('click', processVideo);
+    
+    // Retry button click
+    retryBtn.addEventListener('click', () => {
+        errorMessage.style.display = 'none';
+        uploadContainer.style.display = 'block';
+    });
+    
+    // Setup tabs to change video source
+    document.getElementById('upload-tab').addEventListener('click', () => {
+        videoSource = 'upload';
+        urlPreview.style.display = 'none';
+        if (selectedFile) {
+            previewVideo.style.display = 'block';
+        } else {
+            previewContainer.style.display = 'none';
+        }
+    });
+    
+    document.getElementById('url-tab').addEventListener('click', () => {
+        videoSource = 'url';
+        if (videoUrl) {
+            previewVideo.style.display = 'none';
+            urlPreview.style.display = 'block';
+            previewContainer.style.display = 'block';
+            urlPreviewText.textContent = `URL: ${videoUrl}`;
+        } else {
+            previewContainer.style.display = 'none';
+        }
+    });
+    
+    function preventDefaults(e) {
+        e.preventDefault();
+        e.stopPropagation();
+    }
+    
+    function highlight() {
+        dropArea.classList.add('highlight');
+    }
+    
+    function unhighlight() {
+        dropArea.classList.remove('highlight');
+    }
+    
+    function handleDrop(e) {
+        const dt = e.dataTransfer;
+        const files = dt.files;
+        handleFiles({ target: { files } });
+    }
+    
+    function handleFiles(e) {
+        const files = e.target.files;
+        if (files.length) {
+            selectedFile = files[0];
+            videoSource = 'upload';
+            videoUrl = null;
+            
+            // Check file type
+            const fileType = selectedFile.type;
+            if (!fileType.startsWith('video/')) {
+                alert('Please select a video file.');
+                return;
+            }
+            
+            // Preview the video
+            previewVideo.src = URL.createObjectURL(selectedFile);
+            previewVideo.style.display = 'block';
+            urlPreview.style.display = 'none';
+            previewContainer.style.display = 'block';
+            
+            // Scroll to preview
+            previewContainer.scrollIntoView({ behavior: 'smooth' });
+            
+            // Switch to upload tab
+            document.getElementById('upload-tab').click();
+        }
+    }
+    
+    function handleUrlSubmit() {
+        videoUrl = videoUrlInput.value.trim();
+        
+        if (!videoUrl) {
+            alert('Please enter a valid URL.');
+            return;
+        }
+        
+        // Clear any file that was selected
+        selectedFile = null;
+        videoSource = 'url';
+        
+        // Update the preview
+        previewVideo.style.display = 'none';
+        urlPreview.style.display = 'block';
+        urlPreviewText.textContent = `URL: ${videoUrl}`;
+        previewContainer.style.display = 'block';
+        
+        // Scroll to preview
+        previewContainer.scrollIntoView({ behavior: 'smooth' });
+    }
+    
+    function processVideo() {
+        if (videoSource === 'upload') {
+            if (!selectedFile) {
+                alert('Please select a video file first.');
+                return;
+            }
+            uploadVideoFile();
+        } else if (videoSource === 'url') {
+            if (!videoUrl) {
+                alert('Please enter a video URL first.');
+                return;
+            }
+            processVideoUrl();
+        }
+    }
+    
+    function uploadVideoFile() {
+        // Show upload progress
+        uploadContainer.style.display = 'none';
+        uploadProgress.style.display = 'block';
+        uploadProgressBar.style.width = '0%';
+        uploadStatus.textContent = 'Uploading...';
+        
+        // Create form data
+        const formData = new FormData();
+        formData.append('video', selectedFile);
+        formData.append('aspect_ratio', selectedRatio);
+        
+        // Upload the file
+        const xhr = new XMLHttpRequest();
+        
+        xhr.upload.addEventListener('progress', (e) => {
+            if (e.lengthComputable) {
+                const percentComplete = (e.loaded / e.total) * 100;
+                uploadProgressBar.style.width = percentComplete + '%';
+            }
+        });
+        
+        xhr.addEventListener('readystatechange', function() {
+            if (xhr.readyState === 4) {
+                if (xhr.status === 200) {
+                    const response = JSON.parse(xhr.responseText);
+                    currentTaskId = response.task_id;
+                    
+                    // Start processing
+                    startProcessing();
+                } else {
+                    showError('Error uploading the video. Please try again.');
+                }
+            }
+        });
+        
+        xhr.open('POST', '/upload', true);
+        xhr.send(formData);
+    }
+    
+    function processVideoUrl() {
+        // Show processing directly
+        uploadContainer.style.display = 'none';
+        processingStatus.style.display = 'block';
+        processingProgressBar.style.width = '0%';
+        processingStep.textContent = 'Preparing to process video URL...';
+        
+        // Send the URL to the server
+        fetch('/process_url', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                video_url: videoUrl,
+                aspect_ratio: selectedRatio
+            }),
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                showError(data.error);
+                return;
+            }
+            
+            currentTaskId = data.task_id;
+            processingStatusInterval = setInterval(checkProcessingStatus, 1000);
+        })
+        .catch(error => {
+            showError('Error processing the video URL. Please try again.');
+        });
+    }
+    
+    function startProcessing() {
+        // Hide upload progress
+        uploadProgress.style.display = 'none';
+        
+        // Show processing status
+        processingStatus.style.display = 'block';
+        processingProgressBar.style.width = '0%';
+        processingStep.textContent = 'Initializing...';
+        
+        // Send request to start processing
+        fetch(`/process/${currentTaskId}`, {
+            method: 'POST'
+        })
+        .then(response => response.json())
+        .then(data => {
+            // Start checking status
+            processingStatusInterval = setInterval(checkProcessingStatus, 1000);
+        })
+        .catch(error => {
+            showError('Error starting the processing. Please try again.');
+        });
+    }
+    
+    function checkProcessingStatus() {
+        fetch(`/status/${currentTaskId}`)
+        .then(response => response.json())
+        .then(data => {
+            updateProcessingUI(data);
+            
+            if (data.status === 'completed') {
+                // Processing completed
+                clearInterval(processingStatusInterval);
+                window.location.href = `/result/${currentTaskId}`;
+            } else if (data.status === 'error') {
+                // Processing error
+                clearInterval(processingStatusInterval);
+                showError(data.error || 'An error occurred during processing.');
+            }
+        })
+        .catch(error => {
+            clearInterval(processingStatusInterval);
+            showError('Error checking processing status. Please try again.');
+        });
+    }
+    
+    function updateProcessingUI(data) {
+        processingProgressBar.style.width = data.progress + '%';
+        
+        if (data.progress < 30) {
+            processingStep.textContent = 'Downloading and preparing video...';
+        } else if (data.progress < 70) {
+            processingStep.textContent = 'Detecting and analyzing speakers...';
+        } else {
+            processingStep.textContent = 'Generating smart-cropped video...';
+        }
+    }
+    
+    function showError(message) {
+        processingStatus.style.display = 'none';
+        uploadProgress.style.display = 'none';
+        errorMessage.style.display = 'block';
+        errorText.textContent = message;
+        
+        if (processingStatusInterval) {
+            clearInterval(processingStatusInterval);
+        }
+    }
+</script>
+{% endblock %} 

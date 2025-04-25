@@ -121,7 +121,7 @@ class SmartCropper:
         """Get the default center position"""
         return (frame_width // 2, frame_height // 2)
 
-    def process_video(self, input_video, output_video, speaker_data, min_score=0.5):
+    def process_video(self, input_video, output_video, speaker_data, min_score=0.5, progress_tracker=None):
         cap = cv2.VideoCapture(input_video)
         
         # Get video properties
@@ -183,6 +183,11 @@ class SmartCropper:
             out.write(resized)
 
             frame_idx += 1
+            
+            # Update progress tracker if provided
+            if progress_tracker and frame_idx % 10 == 0:
+                progress_tracker.update(frame_idx)
+                
             if frame_idx % 100 == 0:
                 print(f"Processed {frame_idx}/{total_frames} frames")
 
@@ -198,17 +203,19 @@ class SmartCropper:
         ]
         subprocess.run(extract_audio_cmd, check=True)
 
-        final_encoded = output_video.replace(".mp4", "_h264.mp4")
+        # Create the final encoded video directly to the expected output path
         reencode_cmd = [
             "ffmpeg", "-y",
             "-i", temp_video,
-            "-i", input_video,
+            "-i", audio_file,
             "-map", "0:v",
             "-map", "1:a",
             "-c:v", "libx264", 
             "-crf", "23",
-            "-c:a", "copy",
-            final_encoded
+            "-pix_fmt", "yuv420p",  # Ensure browser compatibility
+            "-c:a", "aac",
+            "-movflags", "+faststart",  # Enable streaming
+            output_video  # Use the exact output path provided
         ]
         subprocess.run(reencode_cmd, check=True)
 
@@ -216,7 +223,7 @@ class SmartCropper:
         os.remove(temp_video)
         os.remove(audio_file)
 
-        print(f"Processing complete: {final_encoded}")
+        print(f"Processing complete: {output_video}")
 
 
 class VideoAnnotator:
@@ -245,6 +252,12 @@ class VideoAnnotator:
         self.movement_threshold = 30  # Pixel distance threshold for movement
         self.sticky_center = None     # Last stable position
         self.smoothing_alpha = 0.2    # Smoothing factor for large movements
+        
+        # Dimension tracking for accurate bounding box scaling
+        self.processing_width = None
+        self.processing_height = None
+        self.original_width = None
+        self.original_height = None
 
     def _calculate_movement(self, pos1, pos2):
         """Calculate Euclidean distance between two positions"""
@@ -274,7 +287,47 @@ class VideoAnnotator:
                     
                     score_idx = min(closest_idx, len(scores) - 1)
                     score = scores[score_idx]
-                    bbox = bboxes[closest_idx]
+                    bbox = bboxes[closest_idx].copy()  # Create a copy to avoid modifying original data
+                    
+                    # Get original dimensions from track or from class variables
+                    orig_width = track.get('orig_width', self.original_width)
+                    orig_height = track.get('orig_height', self.original_height)
+                    
+                    # Apply correct scaling chain:
+                    # 1. Scale from original detection dimensions to processing dimensions (if needed)
+                    # 2. Scale from processing dimensions to output dimensions
+                    
+                    # First scale: If we have original detection dimensions different from processing
+                    if orig_width is not None and orig_height is not None:
+                        # Original detection dimensions to processing dimensions
+                        scale_x1 = self.processing_width / orig_width
+                        scale_y1 = self.processing_height / orig_height
+                        
+                        # Apply first scaling
+                        bbox[0] = bbox[0] * scale_x1
+                        bbox[1] = bbox[1] * scale_y1
+                        bbox[2] = bbox[2] * scale_x1
+                        bbox[3] = bbox[3] * scale_y1
+                    
+                    # Second scale: From processing to output dimensions
+                    scale_x2 = width / self.processing_width
+                    scale_y2 = height / self.processing_height
+                    
+                    # Apply second scaling
+                    bbox[0] = int(bbox[0] * scale_x2)
+                    bbox[1] = int(bbox[1] * scale_y2)
+                    bbox[2] = int(bbox[2] * scale_x2)
+                    bbox[3] = int(bbox[3] * scale_y2)
+                    
+                    # Ensure bounding box is within frame limits
+                    bbox[0] = max(0, min(bbox[0], width-1))
+                    bbox[1] = max(0, min(bbox[1], height-1))
+                    bbox[2] = max(0, min(bbox[2], width-1))
+                    bbox[3] = max(0, min(bbox[3], height-1))
+                    
+                    # Sanity check: ensure width and height are positive
+                    if bbox[2] <= bbox[0] or bbox[3] <= bbox[1]:
+                        continue
                     
                     speaker_info = {
                         'bbox': bbox,
@@ -344,162 +397,245 @@ class VideoAnnotator:
         
         thickness = self.colors['bbox_thickness'] * 2 if is_main_speaker else self.colors['bbox_thickness']
         
+        # Draw bounding box
         cv2.rectangle(frame, (x1, y1), (x2, y2), base_color, thickness)
         
+        # Prepare text
         status = "SPEAKING" if is_active else "SILENT"
         if is_main_speaker:
             status += " (TRACKED)"
         text = f"ID: {track_id} ({status})"
-        cv2.putText(frame, text, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX,
-                    self.colors['text_size'], base_color, 2)
+        
+        # Get text size
+        font_scale = self.colors['text_size'] * 1.2  # Slightly larger
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        (text_width, text_height), baseline = cv2.getTextSize(text, font, font_scale, 2)
+        
+        # Draw text background
+        text_bg_color = (0, 0, 0)
+        text_y = max(0, y1 - 10)
+        cv2.rectangle(
+            frame, 
+            (x1, text_y - text_height - 5),
+            (x1 + text_width, text_y + 5),
+            text_bg_color, 
+            -1  # Filled rectangle
+        )
+        
+        # Draw text
+        cv2.putText(
+            frame, 
+            text, 
+            (x1, text_y), 
+            font,
+            font_scale, 
+            base_color, 
+            2
+        )
 
     def _overlay_phone_frame(self, frame, crop_x, crop_y, crop_w, crop_h):
         """Apply transparency outside the crop area and overlay phone frame"""
+        # Create a mask for the cropped area
         mask = np.zeros(frame.shape[:2], dtype=np.uint8)
         mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w] = 255
 
+        # Add semi-transparent overlay to areas outside the crop window
         overlay = frame.copy()
         inverse_mask = cv2.bitwise_not(mask)
-        overlay_area = frame[inverse_mask > 0]
-        overlay[inverse_mask > 0] = overlay_area * 0.5
+        
+        # Apply dimming effect to areas outside the crop window
+        frame_with_alpha = np.zeros((frame.shape[0], frame.shape[1], 4), dtype=np.uint8)
+        frame_with_alpha[:, :, 0:3] = frame
+        frame_with_alpha[:, :, 3] = 255
+        
+        # Dim the areas outside the crop window
+        frame_with_alpha[inverse_mask > 0, 0:3] = frame_with_alpha[inverse_mask > 0, 0:3] * 0.5
+        
+        # Convert back to BGR
+        frame[:] = frame_with_alpha[:, :, 0:3]
+        
+        # Draw a white rectangle around the crop area
+        cv2.rectangle(frame, (crop_x, crop_y), (crop_x + crop_w, crop_y + crop_h), 
+                     (255, 255, 255), 2)
+        
+        # Add text labels
+        cv2.putText(frame, "9:16 Crop Area", (crop_x + 10, crop_y + 30), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+        
+        # Try to use the phone frame if available
+        try:
+            iphone_frame = cv2.imread("iphone.png", cv2.IMREAD_UNCHANGED)
+            if iphone_frame is not None and iphone_frame.shape[2] == 4:  # Has alpha channel
+                # Resize phone frame to match crop window
+                phone_h, phone_w = iphone_frame.shape[:2]
+                scale = min(crop_w / phone_w, crop_h / phone_h) * 1.1  # Slightly larger
+                new_w, new_h = int(phone_w * scale), int(phone_h * scale)
+                
+                # Center the phone frame around the crop area
+                phone_x = crop_x + (crop_w - new_w) // 2
+                phone_y = crop_y + (crop_h - new_h) // 2
+                
+                if phone_x >= 0 and phone_y >= 0 and phone_x + new_w <= frame.shape[1] and phone_y + new_h <= frame.shape[0]:
+                    resized_phone = cv2.resize(iphone_frame, (new_w, new_h))
+                    
+                    # Extract alpha channel
+                    alpha = resized_phone[:, :, 3] / 255.0
+                    alpha = np.repeat(alpha[:, :, np.newaxis], 3, axis=2)
+                    
+                    # Get ROI from the frame
+                    roi = frame[phone_y:phone_y+new_h, phone_x:phone_x+new_w]
+                    
+                    # Blend with alpha
+                    blended = (1 - alpha) * roi + alpha * resized_phone[:, :, :3]
+                    frame[phone_y:phone_y+new_h, phone_x:phone_x+new_w] = blended
+        except Exception as e:
+            # If phone frame overlay fails, just leave the rectangle
+            print(f"Error applying phone frame: {e}")
 
-        # Blend the overlay with original frame
-        cv2.addWeighted(overlay, 1, frame, 0, 0, frame)
-
-        # Add phone frame if available
-        if self.phone_frame is not None:
-            # Resize phone frame to match crop window
-            resized_phone = cv2.resize(self.phone_frame, (crop_w, crop_h))
+    def process_video(self, input_video, output_video, speaker_data, min_score=0.5, progress_tracker=None):
+        # Load the iPhone frame image
+        try:
+            iphone_frame = cv2.imread("iphone.png", cv2.IMREAD_UNCHANGED)
+            if iphone_frame is None:
+                print("Warning: Could not load iPhone frame image. Proceeding without overlay.")
+        except Exception as e:
+            print(f"Error loading iPhone frame: {e}")
+            iphone_frame = None
             
-            if resized_phone.shape[2] == 4:
-                frame_mask = resized_phone[:, :, 3] / 255.0
-                phone_rgb = resized_phone[:, :, :3]
-                
-                roi = frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
-                
-                for c in range(3):
-                    roi[:, :, c] = roi[:, :, c] * (1 - frame_mask) + phone_rgb[:, :, c] * frame_mask
-        else:
-            cv2.rectangle(frame, (crop_x, crop_y), (crop_x + crop_w, crop_y + crop_h), 
-                         (255, 255, 255), 2)
-
-    def process_video(self, input_video, output_video, speaker_data, min_score=0.5):
         cap = cv2.VideoCapture(input_video)
         
+        # Get video properties
         frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         fps = int(cap.get(cv2.CAP_PROP_FPS))
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
-        print(f"Video properties - Width: {frame_width}, Height: {frame_height}, FPS: {fps}")
         
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        temp_video = os.path.abspath("temp_annotated.mp4")
-        out = cv2.VideoWriter(temp_video, fourcc, fps, (frame_width, frame_height))
+        print(f"Annotator - Input video dimensions: {frame_width}x{frame_height}")
+        
+        # Store dimensions for accurate bounding box mapping
+        self.processing_width = frame_width
+        self.processing_height = frame_height
+        
+        # Get original dimensions from speaker data if available
+        self.original_width = None
+        self.original_height = None
+        if speaker_data and 'tracks' in speaker_data and speaker_data['tracks']:
+            for track in speaker_data['tracks']:
+                if 'orig_width' in track and 'orig_height' in track:
+                    self.original_width = track['orig_width']
+                    self.original_height = track['orig_height']
+                    print(f"Annotator - Original detection dimensions: {self.original_width}x{self.original_height}")
+                    break
+        
+        # Calculate output video dimensions based on original dimensions
+        if frame_width > frame_height:
+            output_width = 1280
+            output_height = int(output_width * frame_height / frame_width)
+        else:
+            output_height = 720
+            output_width = int(output_height * frame_width / frame_height)
+        
+        print(f"Annotator - Output dimensions: {output_width}x{output_height}")
+            
+        # Setup temporary files
+        temp_video = os.path.abspath("temp_annotated_no_audio.mp4")
+        audio_file = os.path.abspath("temp_annotated_audio.aac")
 
+        # Initialize video writer
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out = cv2.VideoWriter(temp_video, fourcc, fps, (output_width, output_height))
+        
         if not out.isOpened():
             print("Error: VideoWriter could not be opened.")
             cap.release()
             return
 
         frame_idx = 0
-        default_center = (frame_width // 2, frame_height // 2)
-
+        main_speaker_id = None
+        
+        # Process each frame
         while True:
             ret, frame = cap.read()
             if not ret:
                 break
-
-            # Get speaker information
+                
+            # Resize the frame to output dimensions
+            frame = cv2.resize(frame, (output_width, output_height))
+            
+            # Get all active speakers and their data for this frame
             active_speakers, silent_speakers, best_speaker = self._get_speaker_data(
-                speaker_data, frame_idx, frame_width, frame_height, min_score
+                speaker_data, frame_idx, output_width, output_height, min_score
             )
-
-            if best_speaker is not None:
-                if self.current_speaker_track_id is None:
-                    # First speaker detected
-                    self.current_speaker_track_id = best_speaker['track_id']
-                    center = best_speaker['center']
-                    self.sticky_center = center
-                elif best_speaker['track_id'] != self.current_speaker_track_id:
-                    if best_speaker['track_id'] == self.potential_new_speaker:
-                        self.potential_speaker_frames += 1
-                        if self.potential_speaker_frames >= self.speaker_consistency_frames:
-                            # Confirmed new speaker - instant jump
-                            self.current_speaker_track_id = best_speaker['track_id']
-                            center = best_speaker['center']
-                            self.sticky_center = center  # Reset sticky position for new speaker
-                            self.potential_new_speaker = None
-                            self.potential_speaker_frames = 0
-                        else:
-                            center = self.sticky_center if self.sticky_center else best_speaker['center']
-                    else:
-                        self.potential_new_speaker = best_speaker['track_id']
-                        self.potential_speaker_frames = 1
-                        center = self.sticky_center if self.sticky_center else best_speaker['center']
-                else:
-                    # Same speaker - handle movement with threshold
-                    center = self._handle_speaker_movement(best_speaker['center'])
-                    self.potential_new_speaker = None
-                    self.potential_speaker_frames = 0
-            else:
-                center = self.sticky_center if self.sticky_center else default_center
-
-            # Calculate crop window
-            crop_x, crop_y, crop_w, crop_h = self._calculate_crop_window(
-                frame_width, frame_height, center
-            )
-
+            
+            # Find the most likely speaker
+            max_score = -1
+            main_speaker = None
+            for speaker in active_speakers:
+                if speaker['score'] > max_score:
+                    max_score = speaker['score']
+                    main_speaker_id = speaker['track_id']
+                    main_speaker = speaker
+            
+            # Draw boxes around all tracked faces
+            for speaker in active_speakers:
+                is_main = (speaker['track_id'] == main_speaker_id)
+                self._draw_speaker_box(frame, speaker['bbox'], speaker['score'] > min_score, speaker['track_id'], is_main)
+            
             # Draw silent speakers
             for speaker in silent_speakers:
-                self._draw_speaker_box(
-                    frame, 
-                    speaker['bbox'], 
-                    is_active=False, 
-                    track_id=speaker['track_id']
-                )
-
-            # Draw active speakers
-            for speaker in active_speakers:
-                is_main = speaker['track_id'] == self.current_speaker_track_id
-                self._draw_speaker_box(
-                    frame, 
-                    speaker['bbox'], 
-                    is_active=True, 
-                    track_id=speaker['track_id'],
-                    is_main_speaker=is_main
-                )
-
-            # Add phone frame overlay
-            self._overlay_phone_frame(frame, crop_x, crop_y, crop_w, crop_h)
-
-            # Add frame information
-            cv2.putText(frame, f"Frame: {frame_idx}", (10, 30), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-
+                self._draw_speaker_box(frame, speaker['bbox'], False, speaker['track_id'], False)
+            
+            # Calculate crop window
+            if main_speaker is not None:
+                center = self._handle_speaker_movement(main_speaker['center'])
+                
+                # Add crop window overlay
+                crop_x, crop_y, crop_w, crop_h = self._calculate_crop_window(output_width, output_height, center)
+                self._overlay_phone_frame(frame, crop_x, crop_y, crop_w, crop_h)
+            
+            # Write the frame
             out.write(frame)
+            
             frame_idx += 1
-
+            
+            # Update progress tracker if provided
+            if progress_tracker and frame_idx % 10 == 0:
+                progress_tracker.update(frame_idx)
+                
             if frame_idx % 100 == 0:
-                print(f"Processed {frame_idx}/{total_frames} frames")
-
+                print(f"Annotated {frame_idx}/{total_frames} frames")
+                
+        # Clean up
         cap.release()
         out.release()
 
-        final_encoded = output_video.replace(".mp4", "_annotated.mp4")
+        # Extract audio from original video
+        extract_audio_cmd = [
+            "ffmpeg", "-y",
+            "-i", input_video,
+            "-vn", "-acodec", "copy",
+            audio_file
+        ]
+        subprocess.run(extract_audio_cmd, check=True)
+
+        # Create the final encoded video using FFmpeg with web-compatible settings
         reencode_cmd = [
             "ffmpeg", "-y",
             "-i", temp_video,
-            "-i", input_video,    
-            "-map", "0:v",        
-            "-map", "1:a", 
+            "-i", audio_file,
+            "-map", "0:v",
+            "-map", "1:a",
             "-c:v", "libx264", 
             "-crf", "23",
-            "-c:a", "copy",
-            final_encoded
+            "-pix_fmt", "yuv420p",  # Ensure browser compatibility
+            "-c:a", "aac",
+            "-movflags", "+faststart",  # Enable streaming
+            output_video
         ]
         subprocess.run(reencode_cmd, check=True)
 
+        # Cleanup
         os.remove(temp_video)
+        os.remove(audio_file)
 
-        print(f"Annotation complete: {final_encoded}")
+        print(f"Annotated video saved to {output_video}")

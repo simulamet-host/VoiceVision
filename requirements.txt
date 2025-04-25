@@ -7,4 +7,6 @@ numpy>=1.19.0
 requests>=2.25.0
 tqdm>=4.50.0
 matplotlib>=3.3.0
-pillow>=8.0.0 
+pillow>=8.0.0
+flask>=2.0.0
+werkzeug>=2.0.0 

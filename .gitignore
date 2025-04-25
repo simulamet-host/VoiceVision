@@ -31,6 +31,10 @@ weights/*.pth
 task/*/
 !task/.gitkeep
 
+# Uploaded files
+uploads/
+!uploads/.gitkeep
+
 # Temporary files
 *.ts
 temp_*.mp4

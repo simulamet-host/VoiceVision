@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+
+{% block head %}
+<style>
+    .video-container {
+        position: relative;
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        transition: all 0.3s ease;
+        margin-bottom: 20px;
+    }
+    
+    .video-container:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+    }
+    
+    .video-tag {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        background-color: rgba(0, 0, 0, 0.7);
+        color: white;
+        padding: 5px 10px;
+        border-radius: 5px;
+        font-size: 0.85rem;
+    }
+    
+    .video-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        opacity: 0;
+        transition: opacity 0.3s;
+        color: white;
+        pointer-events: none;
+    }
+    
+    .video-container:hover .video-overlay {
+        opacity: 1;
+    }
+    
+    .action-btn {
+        margin-top: 20px;
+    }
+    
+    .result-card {
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        margin-bottom: 30px;
+    }
+    
+    .result-header {
+        background: linear-gradient(135deg, #43cea2 0%, #185a9d 100%);
+        color: white;
+        padding: 15px 20px;
+    }
+    
+    .result-body {
+        padding: 20px;
+    }
+    
+    .comparison-container {
+        background-color: #f8f9fa;
+        border-radius: 10px;
+        padding: 20px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="result-card">
+    <div class="result-header">
+        <h2><i class="fas fa-check-circle me-2"></i>Processing Complete!</h2>
+        <p class="mb-0">Your video has been successfully processed with AI-powered speaker detection.</p>
+    </div>
+    <div class="result-body">
+        <div class="alert alert-success" role="alert">
+            <i class="fas fa-info-circle me-2"></i>
+            We've created two versions of your video: a smart-cropped version focusing on active speakers and an annotated version showing detection details.
+        </div>
+        
+        <div class="comparison-container mb-4">
+            <h3 class="mb-3 text-center">Output Videos</h3>
+            
+            <div class="row">
+                <div class="col-md-6">
+                    <div class="video-container">
+                        <div class="video-tag">
+                            <i class="fas fa-crop-alt me-1"></i> Smart Cropped
+                        </div>
+                        <video controls class="img-fluid" poster="{{ url_for('static', filename='img/thumbnail.jpg') }}">
+                            <source src="{{ url_for('video', task_id=task_id, filename=output_filename) }}" type="video/mp4">
+                            Your browser does not support the video tag.
+                        </video>
+                        <div class="video-overlay">
+                            <i class="fas fa-play-circle fa-3x"></i>
+                            <p class="mt-2">Play Smart Cropped Video</p>
+                        </div>
+                    </div>
+                    <div class="text-center mb-4">
+                        <a href="{{ url_for('download_file', task_id=task_id, filename=output_filename) }}" class="btn btn-primary">
+                            <i class="fas fa-download me-2"></i>Download Cropped Video
+                        </a>
+                    </div>
+                </div>
+                
+                <div class="col-md-6">
+                    <div class="video-container">
+                        <div class="video-tag">
+                            <i class="fas fa-tags me-1"></i> Annotated
+                        </div>
+                        <video controls class="img-fluid" poster="{{ url_for('static', filename='img/thumbnail.jpg') }}">
+                            <source src="{{ url_for('video', task_id=task_id, filename=annotated_filename) }}" type="video/mp4">
+                            Your browser does not support the video tag.
+                        </video>
+                        <div class="video-overlay">
+                            <i class="fas fa-play-circle fa-3x"></i>
+                            <p class="mt-2">Play Annotated Video</p>
+                        </div>
+                    </div>
+                    <div class="text-center mb-4">
+                        <a href="{{ url_for('download_file', task_id=task_id, filename=annotated_filename) }}" class="btn btn-secondary">
+                            <i class="fas fa-download me-2"></i>Download Annotated Video
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="text-center">
+            <h4 class="mb-3">What's Next?</h4>
+            <div class="row justify-content-center">
+                <div class="col-md-4">
+                    <div class="card mb-3">
+                        <div class="card-body text-center">
+                            <i class="fas fa-share-alt fa-3x mb-3 text-primary"></i>
+                            <h5>Share Your Video</h5>
+                            <p>Perfect for social media with optimized aspect ratio</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card mb-3">
+                        <div class="card-body text-center">
+                            <i class="fas fa-redo fa-3x mb-3 text-primary"></i>
+                            <h5>Process Another Video</h5>
+                            <p>Try different aspect ratios or videos</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <a href="/" class="btn btn-lg btn-success action-btn">
+                <i class="fas fa-home me-2"></i>Return to Homepage
+            </a>
+        </div>
+    </div>
+</div>
+
+<div class="card mt-4">
+    <div class="card-body">
+        <h3>How It Works</h3>
+        <p>VoiceVision uses advanced AI to detect and track speakers in your videos:</p>
+        <div class="row mt-4">
+            <div class="col-md-4">
+                <div class="text-center">
+                    <i class="fas fa-microphone-alt feature-icon"></i>
+                    <h5>Audio Analysis</h5>
+                    <p>We analyze audio to determine who is speaking at each moment</p>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="text-center">
+                    <i class="fas fa-user-circle feature-icon"></i>
+                    <h5>Face Detection</h5>
+                    <p>Advanced face detection tracks individuals across frames</p>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="text-center">
+                    <i class="fas fa-crop feature-icon"></i>
+                    <h5>Smart Cropping</h5>
+                    <p>Intelligent framing focuses on the active speaker with smooth transitions</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Add play/pause functionality to video overlays
+    document.querySelectorAll('.video-container').forEach(container => {
+        const video = container.querySelector('video');
+        
+        container.addEventListener('click', () => {
+            if (video.paused) {
+                video.play();
+            } else {
+                video.pause();
+            }
+        });
+        
+        video.addEventListener('play', () => {
+            container.querySelector('.video-overlay').style.opacity = 0;
+        });
+        
+        video.addEventListener('pause', () => {
+            container.querySelector('.video-overlay').style.opacity = 1;
+        });
+    });
+</script>
+{% endblock %} 

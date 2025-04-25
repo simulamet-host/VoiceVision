@@ -32,7 +32,7 @@ class SpeakerDetector:
         self.model = talkNet()
         self.model.loadParameters("weights/talknet_speaker_v1.model")
         
-    def process_video(self, video_input, tmp_dir, audio_wav_path=None):
+    def process_video(self, video_input, tmp_dir, audio_wav_path=None, progress_tracker=None):
         """
         Process video from either VideoStore object or file path
         
@@ -40,6 +40,7 @@ class SpeakerDetector:
             video_input: Either a VideoStore object or a file path string
             tmp_dir: Directory for temporary files
             audio_wav_path: Optional path to audio file
+            progress_tracker: Optional progress tracking object with update() method
         """
         frames = []
         
@@ -59,6 +60,11 @@ class SpeakerDetector:
                     break
                 frames.append(frame)
                 frame_count += 1
+                
+                # Update progress if tracker provided
+                if progress_tracker and frame_count % 10 == 0:
+                    progress_tracker.update(frame_count)
+                    
             cap.release()
             log.info(f"Read {frame_count} frames from file")
             
@@ -89,10 +95,15 @@ class SpeakerDetector:
                     break
                 frames.append(frame)
                 frame_count += 1
+                
+                # Update progress if tracker provided
+                if progress_tracker and frame_count % 10 == 0:
+                    progress_tracker.update(frame_count)
+                    
             log.info(f"Read {frame_count} frames from VideoStore")
 
         log.info("Processing faces")
-        faces = self._inference_video_in_memory(frames)
+        faces = self._inference_video_in_memory(frames, progress_tracker)
         
         # Track faces
         face_tracks = self._track_shot(faces, min_track=5)
@@ -123,18 +134,40 @@ class SpeakerDetector:
                 'scores': scores.tolist() if len(scores) > 0 else [],
             }
             results['tracks'].append(track_info)
+            
+            # Update progress if tracker provided
+            if progress_tracker:
+                progress_tracker.update(track_idx + frame_count)
         
         return results
 
-    def _inference_video_in_memory(self, frames_list):
+    def _inference_video_in_memory(self, frames_list, progress_tracker=None):
         DET = S3FD(device=self.device)
         dets = []
+        
+        # Get original frame dimensions for proper scaling
+        if frames_list and len(frames_list) > 0:
+            sample_frame = frames_list[0]
+            orig_height, orig_width = sample_frame.shape[:2]
+            log.info(f"Original frame dimensions: {orig_width}x{orig_height}")
+            
         for fidx, frame in enumerate(frames_list):
             image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             bboxes = DET.detect_faces(image_rgb, conf_th=0.9, scales=[0.25])
             dets.append([])
             for bbox in bboxes:
-                dets[-1].append({'frame':fidx, 'bbox':(bbox[:-1]).tolist(), 'conf':bbox[-1]})
+                dets[-1].append({
+                    'frame': fidx, 
+                    'bbox': (bbox[:-1]).tolist(), 
+                    'conf': bbox[-1],
+                    'orig_width': orig_width,
+                    'orig_height': orig_height
+                })
+                
+            # Update progress if tracker provided (every 10 frames)
+            if progress_tracker and fidx % 10 == 0:
+                progress_tracker.update(fidx)
+                
         return dets
 
     def _bb_intersection_over_union(self, boxA, boxB):
@@ -151,6 +184,19 @@ class SpeakerDetector:
     def _track_shot(self, faces, min_track=10, num_failed_det=10):
         tracks = []
         iouThres = 0.5
+        
+        # Extract frame dimensions from the first face if available
+        orig_width = None
+        orig_height = None
+        for frame_faces in faces:
+            for face in frame_faces:
+                if 'orig_width' in face and 'orig_height' in face:
+                    orig_width = face['orig_width']
+                    orig_height = face['orig_height']
+                    break
+            if orig_width is not None:
+                break
+                
         while True:
             track = []
             for frameFaces in faces:
@@ -177,7 +223,15 @@ class SpeakerDetector:
                     interpfn = interp1d(frameNum, bboxes[:,ij])
                     bboxesI.append(interpfn(frameI))
                 bboxesI = numpy.stack(bboxesI, axis=1)
-                tracks.append({'frame':frameI,'bbox':bboxesI})
+                track_info = {'frame':frameI,'bbox':bboxesI}
+                
+                # Add original frame dimensions if available
+                if orig_width is not None and orig_height is not None:
+                    track_info['orig_width'] = orig_width
+                    track_info['orig_height'] = orig_height
+                    
+                tracks.append(track_info)
+                
         return tracks
 
     def _extract_face(self, image, dets, idx, crop_scale=0.40):
