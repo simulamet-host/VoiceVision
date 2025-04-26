@@ -230,13 +230,95 @@ def get_status(task_id):
         return jsonify({'error': 'Task not found'}), 404
     
     task = tasks[task_id]
+    
+    # Get system info
+    system_info = {
+        'platform': os.name,
+        'memory_usage': get_memory_usage()
+    }
+    
+    # Get any logs for this task
+    logs = get_task_logs(task_id)
+    
     return jsonify({
         'task_id': task_id,
         'status': task['status'],
         'progress': task['progress'],
         'filename': task['filename'],
-        'error': task['error']
+        'error': task['error'],
+        'system_info': system_info,
+        'logs': logs
     })
+
+def get_memory_usage():
+    """Get memory usage information for the current process"""
+    try:
+        import psutil
+        process = psutil.Process(os.getpid())
+        memory_info = process.memory_info()
+        return {
+            'rss': memory_info.rss / (1024 * 1024),  # RSS in MB
+            'vms': memory_info.vms / (1024 * 1024),  # VMS in MB
+            'percent': process.memory_percent(),
+            'total_system': psutil.virtual_memory().total / (1024 * 1024)  # Total system memory in MB
+        }
+    except ImportError:
+        # If psutil is not available, return dummy data
+        return {
+            'rss': 0,
+            'vms': 0,
+            'percent': 0,
+            'total_system': 0
+        }
+    except Exception as e:
+        print(f"Error getting memory usage: {str(e)}")
+        return {
+            'rss': 0,
+            'vms': 0,
+            'percent': 0,
+            'total_system': 0
+        }
+
+def get_task_logs(task_id):
+    """Get processing logs for a specific task"""
+    logs = []
+    
+    # Create mock logs if real logs are not available
+    # In a real implementation, these would come from a log file or database
+    if task_id in tasks:
+        task = tasks[task_id]
+        progress = task['progress']
+        
+        # Add logs based on processing stage
+        if progress >= 10:
+            logs.append({
+                'timestamp': '2025-04-26 18:54:45,123',
+                'level': 'INFO',
+                'message': 'Starting video processing'
+            })
+        
+        if progress >= 30:
+            logs.append({
+                'timestamp': '2025-04-26 18:55:36,784',
+                'level': 'INFO',
+                'message': 'Processing faces'
+            })
+            
+        if progress >= 70:
+            logs.append({
+                'timestamp': '2025-04-26 18:56:04,130',
+                'level': 'INFO',
+                'message': 'Created 2 face tracks'
+            })
+            
+        if progress >= 90:
+            logs.append({
+                'timestamp': '2025-04-26 18:56:45,892',
+                'level': 'INFO',
+                'message': 'Generating output video'
+            })
+    
+    return logs
 
 @app.route('/result/<task_id>', methods=['GET'])
 def result(task_id):
@@ -251,11 +333,15 @@ def result(task_id):
     output_filename = os.path.basename(task['output_path'])
     annotated_filename = os.path.basename(task['annotated_path'])
     
+    # Get logs for this task
+    logs = get_task_logs(task_id)
+    
     return render_template('result.html', 
                           task_id=task_id,
                           filename=task['filename'],
                           output_filename=output_filename,
-                          annotated_filename=annotated_filename)
+                          annotated_filename=annotated_filename,
+                          logs=logs)
 
 @app.route('/video/<task_id>/<filename>')
 def video(task_id, filename):

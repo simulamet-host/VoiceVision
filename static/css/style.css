@@ -143,4 +143,160 @@ footer h5 {
 
 ::-webkit-scrollbar-thumb:hover {
     background: #aaa;
+}
+
+/* Add styles for the metrics panel */
+.metrics-panel {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    width: 320px;
+    background: rgba(0, 0, 0, 0.85);
+    border-radius: 10px;
+    color: #fff;
+    padding: 15px;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    z-index: 1000;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    backdrop-filter: blur(5px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    opacity: 0;
+    transform: translateY(20px);
+    transition: opacity 0.3s, transform 0.3s, max-height 0.5s;
+    overflow: hidden;
+    max-height: 0;
+}
+
+.metrics-panel.active {
+    opacity: 1;
+    transform: translateY(0);
+    max-height: 500px;
+    transition: opacity 0.3s, transform 0.3s, max-height 0.5s;
+}
+
+.metrics-panel.minimized {
+    max-height: 45px; /* Just enough to show the header */
+    overflow: hidden;
+}
+
+.metrics-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+    padding-bottom: 8px;
+}
+
+.metrics-title {
+    font-weight: bold;
+    color: #4a6bff;
+    display: flex;
+    align-items: center;
+}
+
+.metrics-title i {
+    margin-right: 8px;
+}
+
+.metrics-controls {
+    display: flex;
+    gap: 10px;
+}
+
+.metrics-minimize, .metrics-close {
+    cursor: pointer;
+    color: rgba(255, 255, 255, 0.5);
+    transition: color 0.2s;
+}
+
+.metrics-minimize:hover, .metrics-close:hover {
+    color: white;
+}
+
+.metrics-section {
+    margin-bottom: 10px;
+}
+
+.metrics-logs {
+    max-height: 120px;
+    overflow-y: auto;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 4px;
+    padding: 8px;
+    font-family: monospace;
+    font-size: 10px;
+    margin-top: 5px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.log-entry {
+    margin-bottom: 4px;
+    line-height: 1.4;
+    word-break: break-word;
+    padding-left: 10px;
+    border-left: 2px solid rgba(74, 107, 255, 0.6);
+}
+
+.log-entry .timestamp {
+    color: #6e30c9;
+    margin-right: 5px;
+}
+
+.log-entry .level {
+    color: #43cea2;
+    margin-right: 5px;
+    font-weight: bold;
+}
+
+.log-entry .message {
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.metrics-section-title {
+    color: #4a6bff;
+    font-weight: bold;
+    margin-bottom: 5px;
+    font-size: 11px;
+    text-transform: uppercase;
+}
+
+.metrics-item {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 3px;
+}
+
+.metrics-label {
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.metrics-value {
+    font-weight: bold;
+}
+
+.metrics-memory-bar {
+    height: 8px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    margin-top: 5px;
+    overflow: hidden;
+}
+
+.metrics-memory-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #4a6bff, #6e30c9);
+    border-radius: 4px;
+    width: 0%;
+    transition: width 0.5s;
+}
+
+.blink {
+    animation: blink-animation 1s infinite;
+}
+
+@keyframes blink-animation {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
 } 

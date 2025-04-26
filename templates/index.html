@@ -427,6 +427,14 @@
     const videoUrlInput = document.getElementById('videoUrl');
     const urlSubmitBtn = document.getElementById('url-submit-btn');
     
+    // Metrics tracking
+    let processingStartTime = null;
+    let processingStages = {
+        download: { start: null, end: null },
+        detection: { start: null, end: null },
+        cropping: { start: null, end: null }
+    };
+    
     // Prevent default drag behaviors
     ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
         dropArea.addEventListener(eventName, preventDefaults, false);
@@ -470,6 +478,22 @@
         uploadContainer.style.display = 'block';
     });
     
+    // Don't restore metrics panel on page load for index page
+    document.addEventListener('DOMContentLoaded', function() {
+        // Clear previous metrics state when loading the upload page
+        localStorage.setItem('metricsVisible', 'false');
+        
+        // Check for minimize preference and apply it to the minize button icon
+        const metricsMinimized = localStorage.getItem('metricsMinimized') === 'true';
+        if (metricsMinimized) {
+            const minimizeBtn = document.querySelector('.metrics-minimize i');
+            if (minimizeBtn) {
+                minimizeBtn.classList.remove('fa-minus');
+                minimizeBtn.classList.add('fa-plus');
+            }
+        }
+    });
+
     // Setup tabs to change video source
     document.getElementById('upload-tab').addEventListener('click', () => {
         videoSource = 'upload';
@@ -568,12 +592,26 @@
                 alert('Please select a video file first.');
                 return;
             }
+            
+            // Start metrics tracking
+            processingStartTime = Date.now();
+            resetProcessingStages();
+            showMetricsPanel();
+            detectSystemInfo();
+            
             uploadVideoFile();
         } else if (videoSource === 'url') {
             if (!videoUrl) {
                 alert('Please enter a video URL first.');
                 return;
             }
+            
+            // Start metrics tracking
+            processingStartTime = Date.now();
+            resetProcessingStages();
+            showMetricsPanel();
+            detectSystemInfo();
+            
             processVideoUrl();
         }
     }
@@ -625,6 +663,10 @@
         processingProgressBar.style.width = '0%';
         processingStep.textContent = 'Preparing to process video URL...';
         
+        // Update metrics panel
+        updateProcessingStatus('Downloading video from URL');
+        startProcessingStage('download');
+        
         // Send the URL to the server
         fetch('/process_url', {
             method: 'POST',
@@ -660,6 +702,10 @@
         processingProgressBar.style.width = '0%';
         processingStep.textContent = 'Initializing...';
         
+        // Update metrics panel
+        updateProcessingStatus('Starting processing');
+        startProcessingStage('download');
+        
         // Send request to start processing
         fetch(`/process/${currentTaskId}`, {
             method: 'POST'
@@ -683,10 +729,18 @@
             if (data.status === 'completed') {
                 // Processing completed
                 clearInterval(processingStatusInterval);
-                window.location.href = `/result/${currentTaskId}`;
+                endProcessingStage('cropping');
+                updateProcessingStatus('Processing complete');
+                updateTotalProcessingTime();
+                
+                // Redirect after a brief delay to show completed metrics
+                setTimeout(() => {
+                    window.location.href = `/result/${currentTaskId}`;
+                }, 1500);
             } else if (data.status === 'error') {
                 // Processing error
                 clearInterval(processingStatusInterval);
+                updateProcessingStatus('Error occurred');
                 showError(data.error || 'An error occurred during processing.');
             }
         })
@@ -701,11 +755,129 @@
         
         if (data.progress < 30) {
             processingStep.textContent = 'Downloading and preparing video...';
+            updateProcessingStatus('Downloading video');
         } else if (data.progress < 70) {
             processingStep.textContent = 'Detecting and analyzing speakers...';
+            // If we're transitioning to detection stage
+            if (processingStages.download.end === null) {
+                endProcessingStage('download');
+                startProcessingStage('detection');
+                updateProcessingStatus('Detecting speakers');
+            }
         } else {
             processingStep.textContent = 'Generating smart-cropped video...';
+            // If we're transitioning to cropping stage
+            if (processingStages.detection.end === null) {
+                endProcessingStage('detection');
+                startProcessingStage('cropping');
+                updateProcessingStatus('Generating cropped video');
+            }
         }
+        
+        // Update logs if available
+        if (data.logs && data.logs.length > 0) {
+            updateProcessingLogs(data.logs);
+        }
+        
+        // Update system info if available
+        if (data.system_info) {
+            // Update device platform if available
+            if (data.system_info.platform) {
+                document.getElementById('platformInfo').textContent = 
+                    `${getPlatformInfo()} | Server: ${data.system_info.platform}`;
+            }
+            
+            // Update memory usage with real data
+            if (data.system_info.memory_usage) {
+                updateRealMemoryUsage(data.system_info.memory_usage);
+            } else {
+                updateSimulatedMemoryUsage(data.progress);
+            }
+        } else {
+            // Fallback to simulated data
+            updateSimulatedMemoryUsage(data.progress);
+        }
+    }
+    
+    function updateProcessingLogs(logs) {
+        const logsContainer = document.getElementById('processingLogs');
+        
+        // Clear placeholder if present
+        const placeholder = logsContainer.querySelector('.empty-log');
+        if (placeholder) {
+            logsContainer.innerHTML = '';
+        }
+        
+        // Add new logs if they don't already exist
+        logs.forEach(log => {
+            const logId = `log-${log.timestamp.replace(/[\s:,\.]/g, '-')}`;
+            if (!document.getElementById(logId)) {
+                const logEntry = document.createElement('div');
+                logEntry.id = logId;
+                logEntry.className = 'log-entry';
+                
+                const timestamp = document.createElement('span');
+                timestamp.className = 'timestamp';
+                timestamp.textContent = log.timestamp.split(' ')[1]; // Show only time part
+                
+                const level = document.createElement('span');
+                level.className = 'level';
+                level.textContent = log.level;
+                
+                const message = document.createElement('span');
+                message.className = 'message';
+                message.textContent = log.message;
+                
+                logEntry.appendChild(timestamp);
+                logEntry.appendChild(level);
+                logEntry.appendChild(message);
+                
+                logsContainer.appendChild(logEntry);
+            }
+        });
+        
+        // Scroll to bottom to show latest logs
+        logsContainer.scrollTop = logsContainer.scrollHeight;
+        
+        // Store logs in processingMetrics for result page
+        storeProcessingLogs(logs);
+    }
+    
+    function updateRealMemoryUsage(memoryData) {
+        const rss = memoryData.rss || 0;
+        const totalMemory = memoryData.total_system || 8192; // Default to 8GB if not available
+        const memoryPercent = memoryData.percent || (rss / totalMemory * 100);
+        
+        // Update display
+        document.getElementById('memoryUsed').textContent = `${Math.round(rss)} MB (${memoryPercent.toFixed(1)}%)`;
+        document.getElementById('memoryFill').style.width = `${Math.min(100, memoryPercent)}%`;
+    }
+    
+    function updateSimulatedMemoryUsage(progress) {
+        // This is a simulation since we can't directly access server memory
+        // In a real implementation, we would get this data from the server
+        const baseMemory = 200; // MB base memory
+        const maxMemory = 2048; // MB max memory
+        
+        let memoryUsage;
+        if (progress < 30) {
+            // During download phase
+            memoryUsage = baseMemory + (progress / 100) * 300;
+        } else if (progress < 70) {
+            // During detection phase (highest memory usage)
+            memoryUsage = baseMemory + 300 + ((progress - 30) / 40) * 1000;
+        } else {
+            // During cropping phase (decreasing)
+            memoryUsage = baseMemory + 1300 - ((progress - 70) / 30) * 300;
+        }
+        
+        // Add some random fluctuation
+        memoryUsage += Math.random() * 100 - 50;
+        memoryUsage = Math.max(baseMemory, Math.min(maxMemory, memoryUsage));
+        
+        // Update display
+        document.getElementById('memoryUsed').textContent = `${Math.round(memoryUsage)} MB (Simulated)`;
+        document.getElementById('memoryFill').style.width = `${(memoryUsage / maxMemory) * 100}%`;
     }
     
     function showError(message) {
@@ -717,6 +889,131 @@
         if (processingStatusInterval) {
             clearInterval(processingStatusInterval);
         }
+        
+        // Update metrics panel
+        updateProcessingStatus('Error: ' + message);
+    }
+    
+    // Metrics Panel Functions
+    function showMetricsPanel() {
+        const panel = document.getElementById('metricsPanel');
+        panel.classList.add('active');
+        localStorage.setItem('metricsVisible', 'true');
+        
+        // Apply minimized state if previously minimized
+        const metricsMinimized = localStorage.getItem('metricsMinimized') === 'true';
+        if (metricsMinimized) {
+            panel.classList.add('minimized');
+            const minimizeBtn = panel.querySelector('.metrics-minimize i');
+            if (minimizeBtn) {
+                minimizeBtn.classList.remove('fa-minus');
+                minimizeBtn.classList.add('fa-plus');
+            }
+        }
+    }
+    
+    function detectSystemInfo() {
+        // Get device type
+        const deviceType = getDeviceType();
+        document.getElementById('deviceType').textContent = deviceType;
+        
+        // Get platform info
+        const platformInfo = getPlatformInfo();
+        document.getElementById('platformInfo').textContent = platformInfo;
+    }
+    
+    function getDeviceType() {
+        const ua = navigator.userAgent;
+        if (/(tablet|ipad|playbook|silk)|(android(?!.*mobi))/i.test(ua)) {
+            return "Tablet";
+        }
+        if (/Mobile|Android|iP(hone|od)|IEMobile|BlackBerry|Kindle|Silk-Accelerated|(hpw|web)OS|Opera M(obi|ini)/.test(ua)) {
+            return "Mobile";
+        }
+        return "Desktop";
+    }
+    
+    function getPlatformInfo() {
+        const ua = navigator.userAgent;
+        let platform = navigator.platform || "Unknown";
+        
+        // Check for CPU
+        const cpuClass = navigator.cpuClass || "";
+        const cpuInfo = cpuClass ? ` (${cpuClass})` : "";
+        
+        // Check for OS
+        let os = "Unknown OS";
+        if (ua.indexOf("Win") !== -1) os = "Windows";
+        else if (ua.indexOf("Mac") !== -1) os = "MacOS";
+        else if (ua.indexOf("Linux") !== -1) os = "Linux";
+        else if (ua.indexOf("Android") !== -1) os = "Android";
+        else if (ua.indexOf("iOS") !== -1) os = "iOS";
+        
+        return `${os} on ${platform}${cpuInfo}`;
+    }
+    
+    function updateProcessingStatus(status) {
+        const statusElement = document.getElementById('processingStatus');
+        statusElement.textContent = status;
+    }
+    
+    function resetProcessingStages() {
+        processingStages = {
+            download: { start: null, end: null },
+            detection: { start: null, end: null },
+            cropping: { start: null, end: null }
+        };
+        
+        // Reset display
+        document.getElementById('downloadTime').textContent = '--';
+        document.getElementById('detectionTime').textContent = '--';
+        document.getElementById('croppingTime').textContent = '--';
+        document.getElementById('totalTime').textContent = '--';
+    }
+    
+    function startProcessingStage(stage) {
+        if (processingStages[stage]) {
+            processingStages[stage].start = Date.now();
+        }
+    }
+    
+    function endProcessingStage(stage) {
+        if (processingStages[stage] && processingStages[stage].start) {
+            processingStages[stage].end = Date.now();
+            const duration = (processingStages[stage].end - processingStages[stage].start) / 1000;
+            document.getElementById(`${stage}Time`).textContent = `${duration.toFixed(2)}s`;
+        }
+    }
+    
+    function updateTotalProcessingTime() {
+        if (processingStartTime) {
+            const totalDuration = (Date.now() - processingStartTime) / 1000;
+            document.getElementById('totalTime').textContent = `${totalDuration.toFixed(2)}s`;
+            
+            // Store the metrics data for the result page
+            storeProcessingMetrics();
+        }
+    }
+    
+    function storeProcessingMetrics() {
+        // Store all the metrics in localStorage for access on the result page
+        const metricsData = {
+            downloadTime: document.getElementById('downloadTime').textContent,
+            detectionTime: document.getElementById('detectionTime').textContent,
+            croppingTime: document.getElementById('croppingTime').textContent,
+            totalTime: document.getElementById('totalTime').textContent,
+            deviceType: document.getElementById('deviceType').textContent,
+            platformInfo: document.getElementById('platformInfo').textContent,
+            memoryUsed: document.getElementById('memoryUsed').textContent,
+            logs: JSON.parse(localStorage.getItem('processingLogs') || '[]')
+        };
+        
+        localStorage.setItem('processingMetrics', JSON.stringify(metricsData));
+    }
+    
+    function storeProcessingLogs(logs) {
+        // Store logs in localStorage
+        localStorage.setItem('processingLogs', JSON.stringify(logs));
     }
 </script>
 {% endblock %} 

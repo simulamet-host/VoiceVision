@@ -221,7 +221,7 @@
                     </div>
                 </div>
             </div>
-            <a href="/" class="btn btn-lg btn-success action-btn">
+            <a href="/" class="btn btn-lg btn-success action-btn" onclick="clearMetricsState()">
                 <i class="fas fa-home me-2"></i>Return to Homepage
             </a>
         </div>
@@ -257,6 +257,79 @@
         </div>
     </div>
 </div>
+
+<!-- Metrics Panel -->
+<div id="metricsPanel" class="metrics-panel">
+    <div class="metrics-header">
+        <div class="metrics-title">
+            <i class="fas fa-chart-line"></i> System Metrics
+        </div>
+        <div class="metrics-controls">
+            <div class="metrics-minimize" onclick="toggleMinimizeMetricsPanel()">
+                <i class="fas fa-minus"></i>
+            </div>
+            <div class="metrics-close" onclick="toggleMetricsPanel()">
+                <i class="fas fa-times"></i>
+            </div>
+        </div>
+    </div>
+
+    <div class="metrics-section">
+        <div class="metrics-section-title">System Info</div>
+        <div class="metrics-item">
+            <div class="metrics-label">Device:</div>
+            <div class="metrics-value" id="deviceType">-</div>
+        </div>
+        <div class="metrics-item">
+            <div class="metrics-label">Platform:</div>
+            <div class="metrics-value" id="platformInfo">-</div>
+        </div>
+        <div class="metrics-item">
+            <div class="metrics-label">Status:</div>
+            <div class="metrics-value">
+                <span id="processingStatus">Complete</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="metrics-section">
+        <div class="metrics-section-title">Processing Times</div>
+        <div class="metrics-item">
+            <div class="metrics-label">Download:</div>
+            <div class="metrics-value" id="downloadTime">-</div>
+        </div>
+        <div class="metrics-item">
+            <div class="metrics-label">Detection:</div>
+            <div class="metrics-value" id="detectionTime">-</div>
+        </div>
+        <div class="metrics-item">
+            <div class="metrics-label">Cropping:</div>
+            <div class="metrics-value" id="croppingTime">-</div>
+        </div>
+        <div class="metrics-item">
+            <div class="metrics-label">Total:</div>
+            <div class="metrics-value" id="totalTime">-</div>
+        </div>
+    </div>
+
+    <div class="metrics-section">
+        <div class="metrics-section-title">Memory Usage</div>
+        <div class="metrics-item">
+            <div class="metrics-label">Used:</div>
+            <div class="metrics-value" id="memoryUsed">-</div>
+        </div>
+        <div class="metrics-memory-bar">
+            <div id="memoryFill" class="metrics-memory-fill" style="width: 50%"></div>
+        </div>
+    </div>
+    
+    <div class="metrics-section">
+        <div class="metrics-section-title">Processing Logs</div>
+        <div class="metrics-logs" id="processingLogs">
+            <div class="log-entry empty-log">No logs available yet...</div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -286,6 +359,80 @@
     document.addEventListener('DOMContentLoaded', function() {
         const videoContainers = document.querySelectorAll('.video-container');
         const videos = document.querySelectorAll('.video-container video');
+        
+        // Check if metrics panel should be shown based on stored metrics
+        if (localStorage.getItem('metricsVisible') === 'true' && localStorage.getItem('processingMetrics')) {
+            const panel = document.getElementById('metricsPanel');
+            if (panel) {
+                panel.classList.add('active');
+                
+                // Check for minimized state
+                const metricsMinimized = localStorage.getItem('metricsMinimized') === 'true';
+                if (metricsMinimized) {
+                    panel.classList.add('minimized');
+                    const minimizeBtn = panel.querySelector('.metrics-minimize i');
+                    if (minimizeBtn) {
+                        minimizeBtn.classList.remove('fa-minus');
+                        minimizeBtn.classList.add('fa-plus');
+                    }
+                }
+                
+                // Update metrics content with final processing data
+                document.getElementById('processingStatus').textContent = 'Processing Complete';
+                document.getElementById('processingStatus').classList.remove('blink');
+                
+                // Get any stored metrics if available
+                const storedMetrics = JSON.parse(localStorage.getItem('processingMetrics') || '{}');
+                if (storedMetrics.downloadTime) document.getElementById('downloadTime').textContent = storedMetrics.downloadTime;
+                if (storedMetrics.detectionTime) document.getElementById('detectionTime').textContent = storedMetrics.detectionTime;
+                if (storedMetrics.croppingTime) document.getElementById('croppingTime').textContent = storedMetrics.croppingTime;
+                if (storedMetrics.totalTime) document.getElementById('totalTime').textContent = storedMetrics.totalTime;
+                if (storedMetrics.deviceType) document.getElementById('deviceType').textContent = storedMetrics.deviceType;
+                if (storedMetrics.platformInfo) document.getElementById('platformInfo').textContent = storedMetrics.platformInfo;
+                if (storedMetrics.memoryUsed) {
+                    document.getElementById('memoryUsed').textContent = storedMetrics.memoryUsed;
+                    
+                    // Try to extract memory percentage for the progress bar
+                    const memoryMatch = storedMetrics.memoryUsed.match(/\((\d+\.?\d*)%\)/);
+                    if (memoryMatch && memoryMatch[1]) {
+                        document.getElementById('memoryFill').style.width = `${memoryMatch[1]}%`;
+                    } else {
+                        document.getElementById('memoryFill').style.width = '50%'; // Default value
+                    }
+                }
+                
+                // Display logs if available
+                if (storedMetrics.logs && storedMetrics.logs.length > 0) {
+                    displayLogs(storedMetrics.logs);
+                } else {
+                    // If no stored logs are available, check for server-provided logs
+                    checkServerLogs();
+                }
+            }
+        } else {
+            // Always show metrics panel on result page with server-provided logs
+            const panel = document.getElementById('metricsPanel');
+            if (panel) {
+                panel.classList.add('active');
+                document.getElementById('processingStatus').textContent = 'Processing Complete';
+                document.getElementById('processingStatus').classList.remove('blink');
+                localStorage.setItem('metricsVisible', 'true');
+                
+                // Check for minimized state
+                const metricsMinimized = localStorage.getItem('metricsMinimized') === 'true';
+                if (metricsMinimized) {
+                    panel.classList.add('minimized');
+                    const minimizeBtn = panel.querySelector('.metrics-minimize i');
+                    if (minimizeBtn) {
+                        minimizeBtn.classList.remove('fa-minus');
+                        minimizeBtn.classList.add('fa-plus');
+                    }
+                }
+                
+                // Check for server-provided logs
+                checkServerLogs();
+            }
+        }
         
         // Set max height for both video containers
         function setEqualHeights() {
@@ -330,5 +477,92 @@
         // Reset on window resize
         window.addEventListener('resize', setEqualHeights);
     });
+    
+    // Function to clear metrics panel state when going back to homepage
+    function clearMetricsState() {
+        localStorage.setItem('metricsVisible', 'false');
+        localStorage.removeItem('processingMetrics');
+    }
+    
+    // Metrics Panel Toggle Function
+    function toggleMetricsPanel() {
+        const panel = document.getElementById('metricsPanel');
+        const isActive = panel.classList.contains('active');
+        
+        if (isActive) {
+            panel.classList.remove('active');
+            localStorage.setItem('metricsVisible', 'false');
+        } else {
+            panel.classList.add('active');
+            localStorage.setItem('metricsVisible', 'true');
+        }
+    }
+
+    // Metrics Panel Minimize/Expand Function
+    function toggleMinimizeMetricsPanel() {
+        const panel = document.getElementById('metricsPanel');
+        const isMinimized = panel.classList.contains('minimized');
+        const minimizeBtn = panel.querySelector('.metrics-minimize i');
+        
+        if (isMinimized) {
+            // Expand panel
+            panel.classList.remove('minimized');
+            minimizeBtn.classList.remove('fa-plus');
+            minimizeBtn.classList.add('fa-minus');
+            localStorage.setItem('metricsMinimized', 'false');
+        } else {
+            // Minimize panel
+            panel.classList.add('minimized');
+            minimizeBtn.classList.remove('fa-minus');
+            minimizeBtn.classList.add('fa-plus');
+            localStorage.setItem('metricsMinimized', 'true');
+        }
+    }
+
+    // Function to display logs in the metrics panel
+    function displayLogs(logs) {
+        const logsContainer = document.getElementById('processingLogs');
+        logsContainer.innerHTML = ''; // Clear placeholder
+        
+        logs.forEach(log => {
+            const logEntry = document.createElement('div');
+            logEntry.className = 'log-entry';
+            
+            const timestamp = document.createElement('span');
+            timestamp.className = 'timestamp';
+            timestamp.textContent = log.timestamp.split(' ')[1]; // Show only time part
+            
+            const level = document.createElement('span');
+            level.className = 'level';
+            level.textContent = log.level;
+            
+            const message = document.createElement('span');
+            message.className = 'message';
+            message.textContent = log.message;
+            
+            logEntry.appendChild(timestamp);
+            logEntry.appendChild(level);
+            logEntry.appendChild(message);
+            
+            logsContainer.appendChild(logEntry);
+        });
+    }
+    
+    // Function to check for server-provided logs
+    function checkServerLogs() {
+        // Server logs passed from Flask
+        const serverLogs = JSON.parse('{{ logs|tojson|safe }}' || '[]');
+        if (serverLogs && serverLogs.length > 0) {
+            displayLogs(serverLogs);
+            
+            // Also store these logs for future reference
+            localStorage.setItem('processingLogs', JSON.stringify(serverLogs));
+            
+            // Update stored metrics with these logs
+            const metricsData = JSON.parse(localStorage.getItem('processingMetrics') || '{}');
+            metricsData.logs = serverLogs;
+            localStorage.setItem('processingMetrics', JSON.stringify(metricsData));
+        }
+    }
 </script>
 {% endblock %} 
