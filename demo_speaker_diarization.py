@@ -7,7 +7,7 @@ import subprocess
 
 log = logging.getLogger('aiproducer')
 
-def demo_speaker_diarization(task_id: str, video_url: str, output_path: str, target_ratio=(9, 16), min_score=0.4, progress_callback=None):
+def demo_speaker_diarization(task_id: str, video_url: str, output_path: str, target_ratio=(9, 16), min_score=0.4, crop_smoothness=0.2, progress_callback=None):
     """Run speaker diarization demo: process video and generate cropped output.
     
     Args:
@@ -16,6 +16,7 @@ def demo_speaker_diarization(task_id: str, video_url: str, output_path: str, tar
         output_path: Where to save the output cropped video
         target_ratio: Aspect ratio as (width, height) tuple
         min_score: Minimum speaker detection confidence score (0-1)
+        crop_smoothness: Smoothness of camera movement (0-1, higher is smoother)
         progress_callback: Optional callback function for progress updates
               Function signature: progress_callback(stage, progress)
               Where stage is 'download', 'detection', or 'cropping'
@@ -174,13 +175,14 @@ def demo_speaker_diarization(task_id: str, video_url: str, output_path: str, tar
             output_path, 
             speaker_data, 
             min_score,
+            crop_smoothness=crop_smoothness,
             progress_tracker=cropping_progress_tracker
         )
 
         log.info("Generating annotated video...")
         annotated_output = output_path.replace('.mp4', '_annotated.mp4')
         annotator = VideoAnnotator(target_ratio=target_ratio)
-        annotator.process_video(processed_video_path, annotated_output, speaker_data, min_score=min_score)
+        annotator.process_video(processed_video_path, annotated_output, speaker_data, min_score=min_score, crop_smoothness=crop_smoothness)
 
         # Complete the progress
         if progress_callback:
@@ -203,4 +205,4 @@ if __name__ == '__main__':
     video_url = 'https://api.forzasys.com/allsvenskan/playlist.m3u8/12160:0:40000/Manifest.m3u8'
     output_path = f'task/{task_id}/demo_speaker_diarization_output.mp4'
 
-    demo_speaker_diarization(task_id, video_url, output_path, target_ratio=(9, 16), min_score=0.4)
+    demo_speaker_diarization(task_id, video_url, output_path, target_ratio=(9, 16), min_score=0.4, crop_smoothness=0.2)

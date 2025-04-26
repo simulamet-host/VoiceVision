@@ -85,6 +85,10 @@ def upload():
     aspect_ratio = request.form.get('aspect_ratio', '9:16')
     width, height = map(int, aspect_ratio.split(':'))
     
+    # Get advanced settings
+    detection_threshold = float(request.form.get('detection_threshold', '0.4'))
+    crop_smoothness = float(request.form.get('crop_smoothness', '0.2'))
+    
     # Create a unique task ID
     task_id = str(uuid.uuid4())
     
@@ -102,6 +106,8 @@ def upload():
         'aspect_ratio': aspect_ratio,
         'width': width,
         'height': height,
+        'detection_threshold': detection_threshold,
+        'crop_smoothness': crop_smoothness,
         'output_path': None,
         'annotated_path': None,
         'error': None
@@ -116,6 +122,10 @@ def process_url():
         data = request.json
         video_url = data.get('video_url')
         aspect_ratio = data.get('aspect_ratio', '9:16')
+        
+        # Get advanced settings
+        detection_threshold = float(data.get('detection_threshold', 0.4))
+        crop_smoothness = float(data.get('crop_smoothness', 0.2))
         
         if not video_url:
             return jsonify({'error': 'No video URL provided'}), 400
@@ -146,6 +156,8 @@ def process_url():
             'aspect_ratio': aspect_ratio,
             'width': width,
             'height': height,
+            'detection_threshold': detection_threshold,
+            'crop_smoothness': crop_smoothness,
             'output_path': None,
             'annotated_path': None,
             'error': None,
@@ -190,7 +202,8 @@ def process_url_task(task_id):
             video_url=task['video_url'],  # Using the URL directly
             output_path=output_path,
             target_ratio=(task['width'], task['height']),
-            min_score=0.4,
+            min_score=task['detection_threshold'],
+            crop_smoothness=task['crop_smoothness'],
             progress_callback=progress_callback
         )
         
@@ -209,6 +222,8 @@ def process_url_task(task_id):
             'output_path': task['output_path'],
             'annotated_path': task['annotated_path'],
             'video_url': task['video_url'],
+            'detection_threshold': task['detection_threshold'],
+            'crop_smoothness': task['crop_smoothness'],
             'status': 'completed',
             'thumbnail': os.path.join(task_temp_dir, 'thumbnail.jpg'),
         })
@@ -270,7 +285,8 @@ def process_video_task(task_id):
             video_url=task['file_path'],  # Using the local file path
             output_path=output_path,
             target_ratio=(task['width'], task['height']),
-            min_score=0.4,
+            min_score=task['detection_threshold'],
+            crop_smoothness=task['crop_smoothness'],
             progress_callback=progress_callback
         )
         
@@ -288,6 +304,8 @@ def process_video_task(task_id):
             'aspect_ratio': task['aspect_ratio'],
             'output_path': task['output_path'],
             'annotated_path': task['annotated_path'],
+            'detection_threshold': task['detection_threshold'],
+            'crop_smoothness': task['crop_smoothness'],
             'status': 'completed',
             'thumbnail': os.path.join(task_temp_dir, 'thumbnail.jpg'),
         })
@@ -445,7 +463,10 @@ def result(task_id):
                           output_filename=output_filename, 
                           annotated_filename=annotated_filename,
                           logs=logs,
-                          history=history)
+                          history=history,
+                          aspect_ratio=task['aspect_ratio'],
+                          detection_threshold=task['detection_threshold'],
+                          crop_smoothness=task['crop_smoothness'])
 
 @app.route('/video/<task_id>/<filename>')
 def video(task_id, filename):

@@ -298,6 +298,46 @@
                 </div>
             </div>
             
+            <!-- Advanced options -->
+            <div class="mb-4">
+                <a class="d-flex align-items-center text-decoration-none" data-bs-toggle="collapse" href="#advancedOptions" role="button" aria-expanded="false" aria-controls="advancedOptions">
+                    <i class="fas fa-cog me-2"></i>
+                    <h5 class="mb-0">Advanced Settings</h5>
+                    <i class="fas fa-chevron-down ms-2 small"></i>
+                </a>
+                <div class="collapse mt-3" id="advancedOptions">
+                    <div class="card card-body">
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="detectionThreshold" class="form-label">
+                                    <i class="fas fa-microphone-alt me-1"></i>
+                                    Detection Threshold: <span id="thresholdValue">0.4</span>
+                                </label>
+                                <div class="d-flex align-items-center">
+                                    <span class="me-2 text-muted small">Less sensitive</span>
+                                    <input type="range" class="form-range" min="0.1" max="0.9" step="0.05" value="0.4" id="detectionThreshold">
+                                    <span class="ms-2 text-muted small">More sensitive</span>
+                                </div>
+                                <div class="form-text">Controls how sensitive the speaker detection is (0.1-0.9)</div>
+                            </div>
+                            
+                            <div class="col-md-6 mb-3">
+                                <label for="cropSmoothness" class="form-label">
+                                    <i class="fas fa-sliders-h me-1"></i>
+                                    Crop Smoothness: <span id="smoothnessValue">0.2</span>
+                                </label>
+                                <div class="d-flex align-items-center">
+                                    <span class="me-2 text-muted small">Responsive</span>
+                                    <input type="range" class="form-range" min="0.05" max="0.95" step="0.05" value="0.2" id="cropSmoothness">
+                                    <span class="ms-2 text-muted small">Smooth</span>
+                                </div>
+                                <div class="form-text">Controls how smooth camera movements are (0.05-0.95)</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
             <!-- Upload method selection tabs -->
             <h5 class="mb-3">2. Choose video source</h5>
             <ul class="nav nav-tabs mb-3" id="uploadTabs" role="tablist">
@@ -404,6 +444,8 @@
     let processingStatusInterval = null;
     let videoUrl = null;
     let videoSource = 'upload'; // 'upload' or 'url'
+    let detectionThreshold = 0.4; // Detection threshold
+    let cropSmoothness = 0.2;   // Crop smoothness
     
     // DOM elements
     const dropArea = document.getElementById('drop-area');
@@ -426,6 +468,10 @@
     const ratioOptions = document.querySelectorAll('.ratio-option');
     const videoUrlInput = document.getElementById('videoUrl');
     const urlSubmitBtn = document.getElementById('url-submit-btn');
+    const detectionThresholdSlider = document.getElementById('detectionThreshold');
+    const thresholdValueLabel = document.getElementById('thresholdValue');
+    const cropSmoothnessSlider = document.getElementById('cropSmoothness');
+    const smoothnessValueLabel = document.getElementById('smoothnessValue');
     
     // Metrics tracking
     let processingStartTime = null;
@@ -627,6 +673,8 @@
         const formData = new FormData();
         formData.append('video', selectedFile);
         formData.append('aspect_ratio', selectedRatio);
+        formData.append('detection_threshold', detectionThreshold.toString());
+        formData.append('crop_smoothness', cropSmoothness.toString());
         
         // Upload the file
         const xhr = new XMLHttpRequest();
@@ -675,7 +723,9 @@
             },
             body: JSON.stringify({
                 video_url: videoUrl,
-                aspect_ratio: selectedRatio
+                aspect_ratio: selectedRatio,
+                detection_threshold: detectionThreshold,
+                crop_smoothness: cropSmoothness
             }),
         })
         .then(response => response.json())
@@ -1015,5 +1065,16 @@
         // Store logs in localStorage
         localStorage.setItem('processingLogs', JSON.stringify(logs));
     }
+
+    // Handle advanced settings sliders
+    detectionThresholdSlider.addEventListener('input', () => {
+        detectionThreshold = parseFloat(detectionThresholdSlider.value);
+        thresholdValueLabel.textContent = detectionThreshold.toFixed(2);
+    });
+    
+    cropSmoothnessSlider.addEventListener('input', () => {
+        cropSmoothness = parseFloat(cropSmoothnessSlider.value);
+        smoothnessValueLabel.textContent = cropSmoothness.toFixed(2);
+    });
 </script>
 {% endblock %} 

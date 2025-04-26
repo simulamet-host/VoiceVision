@@ -10,6 +10,73 @@ An AI-powered smart interview cropping system that detects speakers in videos an
 - Video annotation with speaker information and detection confidence
 - Works with multiple speakers in the same video
 - Supports various video sources including m3u8 streams
+- Video history sidebar for easy access to previously processed videos
+
+## Application Workflow
+
+```mermaid
+graph TD
+    subgraph Frontend
+        A[Web Interface] --> B[Upload Form]
+        A --> C[Video URL Input]
+        A --> D[Aspect Ratio Selection]
+        A --> E[Video History Sidebar]
+        A --> F[Results Page]
+    end
+
+    subgraph Backend
+        G[Flask App] --> H[Video Processing]
+        G --> I[Storage Management]
+        G --> J[History Management]
+      
+        subgraph "Processing Pipeline"
+            H --> K[Video Download]
+            K --> L[Speaker Detection]
+            L --> M[Face Detection]
+            L --> N[Audio Analysis]
+            M & N --> O[Speaker Diarization]
+            O --> P[Smart Cropping]
+            P --> Q[Video Generation]
+            P --> R[Annotated Version]
+            Q & R --> S[Thumbnail Generation]
+        end
+      
+        subgraph "Storage"
+            I --> T[Task Directory]
+            I --> U[Upload Directory]
+            I --> V[History JSON]
+        end
+    end
+
+    %% User flows
+    B --> |Upload Video| G
+    C --> |Process URL| G
+    D --> |Select Ratio| G
+    G --> |Processing Status| A
+    G --> |Store Results| T
+    G --> |Save to History| V
+    T --> |Serve Videos| F
+    V --> |Display History| E
+    E --> |Select Previous Video| F
+
+    %% Component details
+    classDef frontend fill:#d4f1f9,stroke:#05a3c7,stroke-width:2px
+    classDef backend fill:#ffe6cc,stroke:#f0ad4e,stroke-width:2px
+    classDef processing fill:#d9ead3,stroke:#6aa84f,stroke-width:2px
+    classDef storage fill:#fff2cc,stroke:#ffbf00,stroke-width:2px
+  
+    class A,B,C,D,E,F frontend
+    class G,H,I,J backend
+    class K,L,M,N,O,P,Q,R,S processing
+    class T,U,V storage
+```
+
+The application follows a clean 3-layer architecture:
+
+- **UI Layer**: User interfaces for uploading, viewing results, and browsing history
+- **Config Layer**: Configuration options for processing parameters
+- **Backend Layer**: Core processing logic, storage, and history management
+
 
 ## Requirements
 

@@ -203,7 +203,10 @@ class SmartCropper:
             print(f"Error applying phone overlay: {str(e)}")
             return frame
 
-    def process_video(self, input_video, output_video, speaker_data, min_score=0.5, progress_tracker=None):
+    def process_video(self, input_video, output_video, speaker_data, min_score=0.5, crop_smoothness=0.2, progress_tracker=None):
+        # Update smoothing factor with the user's choice
+        self.smoothing_alpha = crop_smoothness
+        
         cap = cv2.VideoCapture(input_video)
         
         # Get video properties
@@ -589,7 +592,10 @@ class VideoAnnotator:
                 # If phone frame overlay fails, just leave the rectangle
                 print(f"Error applying phone frame: {e}")
 
-    def process_video(self, input_video, output_video, speaker_data, min_score=0.5, progress_tracker=None):
+    def process_video(self, input_video, output_video, speaker_data, min_score=0.5, crop_smoothness=0.2, progress_tracker=None):
+        # Update smoothing factor with the user's choice
+        self.smoothing_alpha = crop_smoothness
+        
         # Load the iPhone frame image
         try:
             iphone_frame = cv2.imread("iphone.png", cv2.IMREAD_UNCHANGED)

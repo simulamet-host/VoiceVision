@@ -144,6 +144,38 @@
             We've created two versions of your video: a smart-cropped version focusing on active speakers and an annotated version showing detection details.
         </div>
         
+        <!-- Processing parameters -->
+        <div class="card mb-3">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-cog me-2"></i>Processing Parameters</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-4">
+                        <div class="text-center">
+                            <i class="fas fa-crop-alt feature-icon mb-2"></i>
+                            <h6>Aspect Ratio</h6>
+                            <p class="mb-0">{{ aspect_ratio }}</p>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="text-center">
+                            <i class="fas fa-microphone-alt feature-icon mb-2"></i>
+                            <h6>Detection Threshold</h6>
+                            <p class="mb-0">{{ detection_threshold }}</p>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="text-center">
+                            <i class="fas fa-sliders-h feature-icon mb-2"></i>
+                            <h6>Crop Smoothness</h6>
+                            <p class="mb-0">{{ crop_smoothness }}</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
         <div class="comparison-container mb-4">
             <h3 class="mb-3 text-center">Output Videos</h3>
             
