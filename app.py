@@ -6,12 +6,14 @@ from werkzeug.utils import secure_filename
 from demo_speaker_diarization import demo_speaker_diarization
 import threading
 import time
+import datetime
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.urandom(24)
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['TASK_FOLDER'] = 'task'
 app.config['MAX_CONTENT_LENGTH'] = 1024 * 1024 * 1000  # 1GB max upload size
+app.config['HISTORY_FILE'] = 'task/video_history.json'
 
 # Ensure upload and task directories exist
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -20,9 +22,54 @@ os.makedirs(app.config['TASK_FOLDER'], exist_ok=True)
 # Store processing tasks with their status
 tasks = {}
 
+# Video history functions
+def load_video_history():
+    """Load the video processing history from JSON file"""
+    if os.path.exists(app.config['HISTORY_FILE']):
+        try:
+            with open(app.config['HISTORY_FILE'], 'r') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Error loading history: {str(e)}")
+            return []
+    return []
+
+def save_video_to_history(task_id, video_data):
+    """Save a processed video to the history"""
+    history = load_video_history()
+    
+    # Add timestamp if not present
+    if 'timestamp' not in video_data:
+        video_data['timestamp'] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+    # Add task_id if not present
+    video_data['task_id'] = task_id
+    
+    # Check if entry already exists and update it, or add new entry
+    for i, entry in enumerate(history):
+        if entry.get('task_id') == task_id:
+            history[i] = video_data
+            break
+    else:
+        history.append(video_data)
+    
+    # Sort by timestamp (newest first)
+    history.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+    
+    # Limit history size to 50 entries
+    history = history[:50]
+    
+    try:
+        with open(app.config['HISTORY_FILE'], 'w') as f:
+            json.dump(history, f)
+    except Exception as e:
+        print(f"Error saving history: {str(e)}")
+
 @app.route('/')
 def index():
-    return render_template('index.html')
+    # Pass video history to the template
+    history = load_video_history()
+    return render_template('index.html', history=history)
 
 @app.route('/upload', methods=['POST'])
 def upload():
@@ -155,6 +202,23 @@ def process_url_task(task_id):
         task['status'] = 'completed'
         task['progress'] = 100
         
+        # Save to history
+        save_video_to_history(task_id, {
+            'filename': task['filename'],
+            'aspect_ratio': task['aspect_ratio'],
+            'output_path': task['output_path'],
+            'annotated_path': task['annotated_path'],
+            'video_url': task['video_url'],
+            'status': 'completed',
+            'thumbnail': os.path.join(task_temp_dir, 'thumbnail.jpg'),
+        })
+        
+        # Generate thumbnail
+        try:
+            generate_thumbnail(task['output_path'], os.path.join(task_temp_dir, 'thumbnail.jpg'))
+        except Exception as e:
+            print(f"Error generating thumbnail: {str(e)}")
+        
     except Exception as e:
         # Handle errors
         task['status'] = 'error'
@@ -218,11 +282,47 @@ def process_video_task(task_id):
         task['status'] = 'completed'
         task['progress'] = 100
         
+        # Save to history
+        save_video_to_history(task_id, {
+            'filename': task['filename'],
+            'aspect_ratio': task['aspect_ratio'],
+            'output_path': task['output_path'],
+            'annotated_path': task['annotated_path'],
+            'status': 'completed',
+            'thumbnail': os.path.join(task_temp_dir, 'thumbnail.jpg'),
+        })
+        
+        # Generate thumbnail
+        try:
+            generate_thumbnail(task['output_path'], os.path.join(task_temp_dir, 'thumbnail.jpg'))
+        except Exception as e:
+            print(f"Error generating thumbnail: {str(e)}")
+        
     except Exception as e:
         # Handle errors
         task['status'] = 'error'
         task['error'] = str(e)
         print(f"Error processing video: {str(e)}")
+
+# Function to generate thumbnail
+def generate_thumbnail(video_path, thumbnail_path):
+    """Generate a thumbnail from the first frame of a video"""
+    try:
+        import cv2
+        cap = cv2.VideoCapture(video_path)
+        ret, frame = cap.read()
+        if ret:
+            # Resize to a reasonable thumbnail size
+            height, width = frame.shape[:2]
+            max_dimension = 300
+            scale = max_dimension / max(height, width)
+            new_width = int(width * scale)
+            new_height = int(height * scale)
+            thumbnail = cv2.resize(frame, (new_width, new_height))
+            cv2.imwrite(thumbnail_path, thumbnail)
+        cap.release()
+    except Exception as e:
+        print(f"Error in thumbnail generation: {str(e)}")
 
 @app.route('/status/<task_id>', methods=['GET'])
 def get_status(task_id):
@@ -323,25 +423,29 @@ def get_task_logs(task_id):
 @app.route('/result/<task_id>', methods=['GET'])
 def result(task_id):
     if task_id not in tasks:
-        return redirect(url_for('index'))
+        return jsonify({'error': 'Task not found'}), 404
     
     task = tasks[task_id]
-    if task['status'] != 'completed':
-        return redirect(url_for('index'))
     
-    # Extract just the filenames for the template
+    if task['status'] != 'completed':
+        return jsonify({'error': 'Task not completed yet'}), 400
+    
+    # Get the filenames for the output videos
     output_filename = os.path.basename(task['output_path'])
     annotated_filename = os.path.basename(task['annotated_path'])
     
-    # Get logs for this task
+    # Get any logs for this task
     logs = get_task_logs(task_id)
     
+    # Load video history
+    history = load_video_history()
+    
     return render_template('result.html', 
-                          task_id=task_id,
-                          filename=task['filename'],
-                          output_filename=output_filename,
+                          task_id=task_id, 
+                          output_filename=output_filename, 
                           annotated_filename=annotated_filename,
-                          logs=logs)
+                          logs=logs,
+                          history=history)
 
 @app.route('/video/<task_id>/<filename>')
 def video(task_id, filename):
@@ -359,6 +463,16 @@ def uploaded_file(filename):
 def download_file(task_id, filename):
     task_dir = os.path.join(app.config['TASK_FOLDER'], task_id)
     return send_from_directory(directory=task_dir, path=filename, as_attachment=True)
+
+@app.route('/thumbnail/<task_id>')
+def thumbnail(task_id):
+    # Check if the thumbnail exists in the task directory
+    thumbnail_path = os.path.join(app.config['TASK_FOLDER'], task_id, 'thumbnail.jpg')
+    if os.path.exists(thumbnail_path):
+        return send_from_directory(os.path.dirname(thumbnail_path), os.path.basename(thumbnail_path))
+    else:
+        # Return a default thumbnail
+        return send_from_directory('static/img', 'thumbnail.jpg')
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5001) 

@@ -7,6 +7,248 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        /* Sidebar styles */
+        .sidebar {
+            position: fixed;
+            top: 0;
+            bottom: 0;
+            left: 0;
+            padding: 58px 0 0;
+            box-shadow: 0 2px 5px 0 rgba(0, 0, 0, 0.05), 0 2px 10px 0 rgba(0, 0, 0, 0.05);
+            width: 280px;
+            z-index: 600;
+            background-color: #f8f9fa;
+            transition: all 0.3s;
+            border-right: 1px solid rgba(0, 0, 0, 0.1);
+        }
+        
+        .sidebar.collapsed {
+            width: 80px;
+        }
+        
+        .sidebar.collapsed .sidebar-heading, 
+        .sidebar.collapsed .nav-item span,
+        .sidebar.collapsed .history-list {
+            display: none;
+        }
+        
+        .history-list {
+            overflow-y: auto;
+            height: calc(100vh - 160px);
+        }
+        
+        .history-item {
+            border-radius: 8px;
+            transition: all 0.2s;
+            padding: 10px;
+            margin: 8px 10px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            border-left: 3px solid transparent;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+            background-color: white;
+        }
+        
+        .history-item:hover {
+            background-color: rgba(74, 107, 255, 0.1);
+            border-left: 3px solid var(--primary-color);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+        }
+        
+        .history-item.active {
+            background-color: rgba(74, 107, 255, 0.2);
+            border-left: 3px solid var(--primary-color);
+        }
+        
+        .history-thumbnail {
+            width: 60px;
+            height: 60px;
+            min-width: 60px; /* Prevent shrinking */
+            object-fit: cover;
+            border-radius: 4px;
+            background-color: #e9ecef;
+            margin-right: 10px;
+            flex-shrink: 0;
+            overflow: hidden;
+            border: 1px solid #ddd;
+        }
+        
+        .history-thumbnail img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        .history-info {
+            flex-grow: 1;
+            overflow: hidden;
+            width: calc(100% - 70px); /* Account for thumbnail width and margin */
+        }
+        
+        .history-filename {
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 100%;
+        }
+        
+        .history-timestamp {
+            font-size: 0.8rem;
+            color: var(--gray-color);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .history-ratio {
+            font-size: 0.8rem;
+            background-color: var(--primary-color);
+            color: white;
+            padding: 2px 6px;
+            border-radius: 4px;
+            display: inline-block;
+            margin-top: 3px;
+        }
+        
+        .sidebar-toggle {
+            position: absolute;
+            top: 70px;
+            right: -15px;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            background-color: var(--primary-color);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+            z-index: 650;
+        }
+        
+        /* Make the sidebar header more visible */
+        .sidebar-heading {
+            background-color: rgba(74, 107, 255, 0.1);
+            border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+            padding: 15px !important;
+        }
+        
+        .sidebar-heading h5 {
+            color: var(--primary-color);
+            font-weight: 600;
+        }
+        
+        /* Content space adjustment */
+        .main-content {
+            margin-left: 280px;
+            transition: margin 0.3s;
+        }
+        
+        .main-content.expanded {
+            margin-left: 80px;
+        }
+        
+        /* Responsive */
+        @media (max-width: 768px) {
+            .sidebar {
+                width: 240px;
+                transform: translateX(-100%);
+            }
+            
+            .sidebar.collapsed {
+                transform: translateX(0);
+                width: 240px;
+            }
+            
+            .sidebar.collapsed .sidebar-heading, 
+            .sidebar.collapsed .nav-item span,
+            .sidebar.collapsed .history-list {
+                display: block;
+            }
+            
+            .main-content {
+                margin-left: 0;
+            }
+            
+            .main-content.expanded {
+                margin-left: 0;
+            }
+            
+            .sidebar-toggle {
+                right: -15px;
+            }
+        }
+        
+        /* Sidebar hint toast */
+        .sidebar-hint-toast {
+            position: fixed;
+            bottom: 20px;
+            left: 300px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            z-index: 9999;
+            width: 300px;
+            overflow: hidden;
+            animation: fadeIn 0.5s;
+            border: 1px solid rgba(0,0,0,0.1);
+        }
+        
+        .sidebar-hint-toast.hiding {
+            animation: fadeOut 0.5s;
+        }
+        
+        .toast-header {
+            display: flex;
+            align-items: center;
+            padding: 10px 15px;
+            background-color: #f8f9fa;
+            border-bottom: 1px solid rgba(0,0,0,0.1);
+        }
+        
+        .toast-body {
+            padding: 15px;
+            position: relative;
+        }
+        
+        .hint-arrow {
+            position: absolute;
+            left: -20px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--primary-color);
+            font-size: 24px;
+            animation: bounceLeft 1s infinite;
+        }
+        
+        @keyframes bounceLeft {
+            0%, 100% { transform: translateX(0) translateY(-50%); }
+            50% { transform: translateX(-10px) translateY(-50%); }
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        @keyframes fadeOut {
+            from { opacity: 1; transform: translateY(0); }
+            to { opacity: 0; transform: translateY(20px); }
+        }
+        
+        @media (max-width: 768px) {
+            .sidebar-hint-toast {
+                left: 20px;
+                right: 20px;
+                width: auto;
+            }
+        }
+    </style>
     {% block head %}{% endblock %}
 </head>
 <body>
@@ -31,26 +273,147 @@
         </div>
     </nav>
 
-    <div class="container my-4">
-        {% block content %}{% endblock %}
+    <!-- Sidebar -->
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-toggle" onclick="toggleSidebar()">
+            <i class="fas fa-chevron-left" id="sidebar-toggle-icon"></i>
+        </div>
+        <div class="sidebar-heading p-3 pb-1">
+            <h5 class="mb-0"><i class="fas fa-history me-2"></i>Video History</h5>
+            <p class="text-muted mb-0 small">Your previously processed videos</p>
+        </div>
+        <div class="history-list p-2">
+            {% if history %}
+                {% for item in history %}
+                <div class="history-item{% if task_id is defined and task_id == item.task_id %} active{% endif %}" 
+                     onclick="window.location.href='{{ url_for('result', task_id=item.task_id) }}';">
+                    <div class="history-thumbnail">
+                        {% if item.thumbnail and (item.thumbnail.startswith('http') or '/static/' in item.thumbnail) %}
+                            <img src="{{ item.thumbnail }}" alt="Thumbnail" class="img-fluid">
+                        {% else %}
+                            <img src="{{ url_for('thumbnail', task_id=item.task_id) }}" alt="Thumbnail" class="img-fluid">
+                        {% endif %}
+                    </div>
+                    <div class="history-info">
+                        <div class="history-filename">{{ item.filename }}</div>
+                        <div class="history-timestamp">{{ item.timestamp }}</div>
+                        <div class="history-ratio">{{ item.aspect_ratio }}</div>
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="text-center text-muted p-4">
+                    <i class="fas fa-film mb-2 fa-2x"></i>
+                    <p>No processed videos yet.</p>
+                    <p class="small">Processed videos will appear here for easy access.</p>
+                </div>
+            {% endif %}
+        </div>
     </div>
 
-    <footer class="bg-dark text-white py-4 mt-5">
-        <div class="container">
-            <div class="row">
-                <div class="col-md-6">
-                    <h5>VoiceVision</h5>
-                    <p>AI-powered smart video cropping for interviews and presentations</p>
-                </div>
-                <div class="col-md-6 text-md-end">
-                    <p>© 2025 VoiceVision. All rights reserved.</p>
+    <div class="main-content" id="main-content">
+        <div class="container my-4">
+            {% block content %}{% endblock %}
+        </div>
+
+        <footer class="bg-dark text-white py-4 mt-5">
+            <div class="container">
+                <div class="row">
+                    <div class="col-md-6">
+                        <h5>VoiceVision</h5>
+                        <p>AI-powered smart video cropping for interviews and presentations</p>
+                    </div>
+                    <div class="col-md-6 text-md-end">
+                        <p>© 2025 VoiceVision. All rights reserved.</p>
+                    </div>
                 </div>
             </div>
-        </div>
-    </footer>
+        </footer>
+    </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    
+    <script>
+        // Sidebar toggle function
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            const mainContent = document.getElementById('main-content');
+            const toggleIcon = document.getElementById('sidebar-toggle-icon');
+            
+            sidebar.classList.toggle('collapsed');
+            mainContent.classList.toggle('expanded');
+            
+            // Update icon direction
+            if (sidebar.classList.contains('collapsed')) {
+                toggleIcon.classList.remove('fa-chevron-left');
+                toggleIcon.classList.add('fa-chevron-right');
+                localStorage.setItem('sidebarCollapsed', 'true');
+            } else {
+                toggleIcon.classList.remove('fa-chevron-right');
+                toggleIcon.classList.add('fa-chevron-left');
+                localStorage.setItem('sidebarCollapsed', 'false');
+            }
+        }
+        
+        // Initialize sidebar state from localStorage
+        document.addEventListener('DOMContentLoaded', function() {
+            const sidebar = document.getElementById('sidebar');
+            const mainContent = document.getElementById('main-content');
+            const toggleIcon = document.getElementById('sidebar-toggle-icon');
+            
+            if (localStorage.getItem('sidebarCollapsed') === 'true') {
+                sidebar.classList.add('collapsed');
+                mainContent.classList.add('expanded');
+                toggleIcon.classList.remove('fa-chevron-left');
+                toggleIcon.classList.add('fa-chevron-right');
+            }
+            
+            // Show sidebar hint for first-time users
+            if (!localStorage.getItem('sidebarHintShown')) {
+                // Create and show toast
+                const toast = document.createElement('div');
+                toast.className = 'sidebar-hint-toast';
+                toast.innerHTML = `
+                    <div class="toast-header">
+                        <i class="fas fa-info-circle text-primary me-2"></i>
+                        <strong class="me-auto">New Feature!</strong>
+                        <button type="button" class="btn-close" onclick="dismissSidebarHint()"></button>
+                    </div>
+                    <div class="toast-body">
+                        <p>Check out the <strong>Video History</strong> sidebar for quick access to your processed videos!</p>
+                        <div class="hint-arrow">
+                            <i class="fas fa-arrow-left"></i>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(toast);
+                
+                // Mark as shown
+                localStorage.setItem('sidebarHintShown', 'true');
+                
+                // Auto dismiss after 10 seconds
+                setTimeout(() => {
+                    toast.classList.add('hiding');
+                    setTimeout(() => {
+                        toast.remove();
+                    }, 500);
+                }, 10000);
+            }
+        });
+        
+        // Dismiss sidebar hint
+        function dismissSidebarHint() {
+            const toast = document.querySelector('.sidebar-hint-toast');
+            if (toast) {
+                toast.classList.add('hiding');
+                setTimeout(() => {
+                    toast.remove();
+                }, 500);
+            }
+        }
+    </script>
+    
     {% block scripts %}{% endblock %}
 
     <!-- Metrics Panel -->
