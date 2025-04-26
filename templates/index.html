@@ -26,12 +26,23 @@
     .ratio-option {
         cursor: pointer;
         transition: all 0.2s;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        padding: 15px;
+        border-radius: 10px;
+        background-color: #f8f9fa;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+        position: relative;
+        width: 100%;
     }
     .ratio-option:hover {
         transform: scale(1.05);
+        box-shadow: 0 5px 15px rgba(0,0,0,0.1);
     }
     .ratio-option.selected {
         border: 2px solid #0d6efd;
+        background-color: rgba(13, 110, 253, 0.1);
     }
     .aspect-ratio-container {
         position: relative;
@@ -39,32 +50,62 @@
         width: 100%;
         border-radius: 8px;
         background-color: #e9ecef;
+        margin-bottom: 15px;
+        /* Fixed height for all containers */
+        height: 200px;
     }
     .aspect-ratio-container .ratio-inner {
-        padding-top: 30px;
-        padding-bottom: 30px;
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
         display: flex;
         justify-content: center;
         align-items: center;
         color: #6c757d;
     }
-    .aspect-ratio-container.ratio-9-16 .ratio-inner {
-        padding-top: 177.78%; /* 16:9 aspect ratio */
+    /* Display content differently based on aspect ratio */
+    .aspect-ratio-container.ratio-9-16 .ratio-content {
+        width: 56.25%; /* 9:16 width ratio compared to height */
+        height: 85%;
+        background-color: white;
+        border-radius: 8px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
     }
-    .aspect-ratio-container.ratio-1-1 .ratio-inner {
-        padding-top: 100%; /* 1:1 aspect ratio */
+    .aspect-ratio-container.ratio-1-1 .ratio-content {
+        width: 85%;
+        height: 85%;
+        background-color: white;
+        border-radius: 8px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
     }
-    .aspect-ratio-container.ratio-4-5 .ratio-inner {
-        padding-top: 125%; /* 4:5 aspect ratio */
+    .aspect-ratio-container.ratio-4-5 .ratio-content {
+        width: 68%; /* 4:5 width ratio compared to height */
+        height: 85%;
+        background-color: white;
+        border-radius: 8px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
     }
-    .aspect-ratio-label {
-        position: absolute;
-        bottom: 10px;
-        left: 0;
-        right: 0;
-        text-align: center;
-        font-weight: bold;
+    .ratio-title {
+        font-weight: 600;
+        margin-top: auto;
         color: #495057;
+        font-size: 1rem;
+    }
+    .ratio-subtitle {
+        color: #6c757d;
+        font-size: 0.85rem;
+        margin-top: 5px;
     }
     .hero-section {
         background: linear-gradient(135deg, #4a6bff 0%, #6e30c9 100%);
@@ -120,6 +161,48 @@
     #url-preview {
         display: none;
     }
+    /* Better icon styling for ratio options */
+    .ratio-option .fa-mobile-alt,
+    .ratio-option .fa-square,
+    .ratio-option .fa-portrait {
+        color: #0d6efd;
+    }
+    
+    .ratio-option.selected .fa-mobile-alt,
+    .ratio-option.selected .fa-square,
+    .ratio-option.selected .fa-portrait {
+        color: #0d47a1;
+    }
+    
+    /* Add a visual indicator for selected option */
+    .ratio-option.selected::after {
+        content: "\f00c"; /* Font Awesome checkmark */
+        font-family: "Font Awesome 5 Free";
+        font-weight: 900;
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        color: #0d6efd;
+        font-size: 1.2rem;
+    }
+    
+    /* Equal height row container */
+    .ratio-options-container {
+        display: flex;
+        flex-wrap: wrap;
+    }
+    
+    /* Each ratio option wrapper */
+    .ratio-option-wrapper {
+        display: flex;
+        margin-bottom: 20px;
+    }
+    
+    @media (max-width: 768px) {
+        .aspect-ratio-container {
+            height: 150px;
+        }
+    }
 </style>
 {% endblock %}
 
@@ -171,35 +254,46 @@
         <div id="upload-container">
             <!-- Aspect ratio selection -->
             <h5 class="mb-3">1. Select aspect ratio</h5>
-            <div class="row mb-4">
-                <div class="col-md-4">
-                    <div class="ratio-option selected" data-ratio="9:16">
-                        <div class="aspect-ratio-container ratio-9-16">
-                            <div class="ratio-inner">
-                                <i class="fas fa-mobile-alt fa-3x"></i>
+            <div class="ratio-options-container mb-4">
+                <div class="row w-100">
+                    <div class="col-md-4 ratio-option-wrapper">
+                        <div class="ratio-option selected" data-ratio="9:16">
+                            <div class="aspect-ratio-container ratio-9-16">
+                                <div class="ratio-inner">
+                                    <div class="ratio-content">
+                                        <i class="fas fa-mobile-alt fa-3x"></i>
+                                    </div>
+                                </div>
                             </div>
+                            <div class="ratio-title text-center">9:16</div>
+                            <div class="ratio-subtitle text-center">Vertical - Mobile, TikTok, Stories</div>
                         </div>
-                        <p class="text-center mt-2">9:16 (Mobile)</p>
                     </div>
-                </div>
-                <div class="col-md-4">
-                    <div class="ratio-option" data-ratio="1:1">
-                        <div class="aspect-ratio-container ratio-1-1">
-                            <div class="ratio-inner">
-                                <i class="fas fa-square fa-3x"></i>
+                    <div class="col-md-4 ratio-option-wrapper">
+                        <div class="ratio-option" data-ratio="1:1">
+                            <div class="aspect-ratio-container ratio-1-1">
+                                <div class="ratio-inner">
+                                    <div class="ratio-content">
+                                        <i class="fas fa-square fa-3x"></i>
+                                    </div>
+                                </div>
                             </div>
+                            <div class="ratio-title text-center">1:1</div>
+                            <div class="ratio-subtitle text-center">Square - Instagram, Facebook</div>
                         </div>
-                        <p class="text-center mt-2">1:1 (Square)</p>
                     </div>
-                </div>
-                <div class="col-md-4">
-                    <div class="ratio-option" data-ratio="4:5">
-                        <div class="aspect-ratio-container ratio-4-5">
-                            <div class="ratio-inner">
-                                <i class="fas fa-portrait fa-3x"></i>
+                    <div class="col-md-4 ratio-option-wrapper">
+                        <div class="ratio-option" data-ratio="4:5">
+                            <div class="aspect-ratio-container ratio-4-5">
+                                <div class="ratio-inner">
+                                    <div class="ratio-content">
+                                        <i class="fas fa-portrait fa-3x"></i>
+                                    </div>
+                                </div>
                             </div>
+                            <div class="ratio-title text-center">4:5</div>
+                            <div class="ratio-subtitle text-center">Portrait - Instagram Feed</div>
                         </div>
-                        <p class="text-center mt-2">4:5 (Instagram)</p>
                     </div>
                 </div>
             </div>

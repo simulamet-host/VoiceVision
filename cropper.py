@@ -8,6 +8,17 @@ class SmartCropper:
         self.target_ratio = target_ratio[0] / target_ratio[1]
         self.output_width = target_ratio[0] * 100
         self.output_height = target_ratio[1] * 100
+        self.is_phone_ratio = abs(self.target_ratio - (9/16)) < 0.1  # Check if it's close to 9:16
+        
+        # Try to load iPhone frame if we're using 9:16 ratio
+        self.phone_frame = None
+        if self.is_phone_ratio:
+            try:
+                self.phone_frame = cv2.imread('iphone.png', cv2.IMREAD_UNCHANGED)
+                if self.phone_frame is None:
+                    print("Warning: Could not load phone frame image.")
+            except Exception as e:
+                print(f"Error loading iPhone frame: {e}")
         
         # Speaker tracking
         self.current_speaker_track_id = None
@@ -121,6 +132,77 @@ class SmartCropper:
         """Get the default center position"""
         return (frame_width // 2, frame_height // 2)
 
+    def _apply_phone_overlay(self, frame):
+        """Apply iPhone overlay to the video frame if using 9:16 ratio"""
+        if not self.is_phone_ratio or self.phone_frame is None:
+            return frame
+        
+        try:
+            # Get dimensions
+            frame_h, frame_w = frame.shape[:2]
+            phone_h, phone_w = self.phone_frame.shape[:2]
+            
+            # Calculate scale to fit phone frame around the video
+            # Make it slightly larger than the video
+            scale_factor = 1.05
+            scale_w = (frame_w * scale_factor) / phone_w
+            scale_h = (frame_h * scale_factor) / phone_h
+            scale = min(scale_w, scale_h)
+            
+            # Resize phone frame
+            new_w = int(phone_w * scale)
+            new_h = int(phone_h * scale)
+            resized_phone = cv2.resize(self.phone_frame, (new_w, new_h))
+            
+            # Center phone frame around the video
+            pos_x = (frame_w - new_w) // 2
+            pos_y = (frame_h - new_h) // 2
+            
+            # Create output frame with alpha channel
+            result = np.zeros((frame_h, frame_w, 4), dtype=np.uint8)
+            result[:, :, :3] = frame
+            result[:, :, 3] = 255  # Full opacity
+            
+            # Calculate ROI and ensure it's within bounds
+            if pos_x < 0:
+                src_x = -pos_x
+                dst_x = 0
+                roi_w = min(new_w - src_x, frame_w)
+            else:
+                src_x = 0
+                dst_x = pos_x
+                roi_w = min(new_w, frame_w - pos_x)
+                
+            if pos_y < 0:
+                src_y = -pos_y
+                dst_y = 0
+                roi_h = min(new_h - src_y, frame_h)
+            else:
+                src_y = 0
+                dst_y = pos_y
+                roi_h = min(new_h, frame_h - pos_y)
+            
+            # Skip if ROI is invalid
+            if roi_w <= 0 or roi_h <= 0:
+                return frame
+                
+            # Get alpha channel from phone frame
+            phone_alpha = resized_phone[src_y:src_y+roi_h, src_x:src_x+roi_w, 3] / 255.0
+            
+            # Apply alpha blending
+            for c in range(3):  # RGB channels
+                result[dst_y:dst_y+roi_h, dst_x:dst_x+roi_w, c] = (
+                    (1 - phone_alpha) * frame[dst_y:dst_y+roi_h, dst_x:dst_x+roi_w, c] + 
+                    phone_alpha * resized_phone[src_y:src_y+roi_h, src_x:src_x+roi_w, c]
+                )
+            
+            # Convert back to BGR
+            return result[:, :, :3]
+            
+        except Exception as e:
+            print(f"Error applying phone overlay: {str(e)}")
+            return frame
+
     def process_video(self, input_video, output_video, speaker_data, min_score=0.5, progress_tracker=None):
         cap = cv2.VideoCapture(input_video)
         
@@ -180,6 +262,11 @@ class SmartCropper:
             x, y, crop_w, crop_h = self._get_crop_window(frame_width, frame_height, center[0], center[1])
             cropped = frame[y:y+crop_h, x:x+crop_w]
             resized = cv2.resize(cropped, (self.output_width, self.output_height))
+            
+            # Apply phone overlay if using 9:16 ratio
+            if self.is_phone_ratio:
+                resized = self._apply_phone_overlay(resized)
+                
             out.write(resized)
 
             frame_idx += 1
@@ -458,39 +545,49 @@ class VideoAnnotator:
         cv2.rectangle(frame, (crop_x, crop_y), (crop_x + crop_w, crop_y + crop_h), 
                      (255, 255, 255), 2)
         
-        # Add text labels
-        cv2.putText(frame, "9:16 Crop Area", (crop_x + 10, crop_y + 30), 
+        # Calculate aspect ratio to determine if we're working with 9:16
+        aspect_ratio = crop_w / crop_h if crop_h > 0 else 0
+        is_phone_ratio = abs(aspect_ratio - (9/16)) < 0.1  # Check if it's close to 9:16
+        
+        # Add appropriate text label based on the aspect ratio
+        if is_phone_ratio:
+            aspect_label = "9:16 Mobile Crop"
+        else:
+            aspect_label = f"{crop_w/crop_h:.2f} Aspect Ratio Crop"
+            
+        cv2.putText(frame, aspect_label, (crop_x + 10, crop_y + 30), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
         
-        # Try to use the phone frame if available
-        try:
-            iphone_frame = cv2.imread("iphone.png", cv2.IMREAD_UNCHANGED)
-            if iphone_frame is not None and iphone_frame.shape[2] == 4:  # Has alpha channel
-                # Resize phone frame to match crop window
-                phone_h, phone_w = iphone_frame.shape[:2]
-                scale = min(crop_w / phone_w, crop_h / phone_h) * 1.1  # Slightly larger
-                new_w, new_h = int(phone_w * scale), int(phone_h * scale)
-                
-                # Center the phone frame around the crop area
-                phone_x = crop_x + (crop_w - new_w) // 2
-                phone_y = crop_y + (crop_h - new_h) // 2
-                
-                if phone_x >= 0 and phone_y >= 0 and phone_x + new_w <= frame.shape[1] and phone_y + new_h <= frame.shape[0]:
-                    resized_phone = cv2.resize(iphone_frame, (new_w, new_h))
+        # Only apply iPhone frame for 9:16 aspect ratio
+        if is_phone_ratio:
+            try:
+                iphone_frame = cv2.imread("iphone.png", cv2.IMREAD_UNCHANGED)
+                if iphone_frame is not None and iphone_frame.shape[2] == 4:  # Has alpha channel
+                    # Resize phone frame to match crop window
+                    phone_h, phone_w = iphone_frame.shape[:2]
+                    scale = min(crop_w / phone_w, crop_h / phone_h) * 1.1  # Slightly larger
+                    new_w, new_h = int(phone_w * scale), int(phone_h * scale)
                     
-                    # Extract alpha channel
-                    alpha = resized_phone[:, :, 3] / 255.0
-                    alpha = np.repeat(alpha[:, :, np.newaxis], 3, axis=2)
+                    # Center the phone frame around the crop area
+                    phone_x = crop_x + (crop_w - new_w) // 2
+                    phone_y = crop_y + (crop_h - new_h) // 2
                     
-                    # Get ROI from the frame
-                    roi = frame[phone_y:phone_y+new_h, phone_x:phone_x+new_w]
-                    
-                    # Blend with alpha
-                    blended = (1 - alpha) * roi + alpha * resized_phone[:, :, :3]
-                    frame[phone_y:phone_y+new_h, phone_x:phone_x+new_w] = blended
-        except Exception as e:
-            # If phone frame overlay fails, just leave the rectangle
-            print(f"Error applying phone frame: {e}")
+                    if phone_x >= 0 and phone_y >= 0 and phone_x + new_w <= frame.shape[1] and phone_y + new_h <= frame.shape[0]:
+                        resized_phone = cv2.resize(iphone_frame, (new_w, new_h))
+                        
+                        # Extract alpha channel
+                        alpha = resized_phone[:, :, 3] / 255.0
+                        alpha = np.repeat(alpha[:, :, np.newaxis], 3, axis=2)
+                        
+                        # Get ROI from the frame
+                        roi = frame[phone_y:phone_y+new_h, phone_x:phone_x+new_w]
+                        
+                        # Blend with alpha
+                        blended = (1 - alpha) * roi + alpha * resized_phone[:, :, :3]
+                        frame[phone_y:phone_y+new_h, phone_x:phone_x+new_w] = blended
+            except Exception as e:
+                # If phone frame overlay fails, just leave the rectangle
+                print(f"Error applying phone frame: {e}")
 
     def process_video(self, input_video, output_video, speaker_data, min_score=0.5, progress_tracker=None):
         # Load the iPhone frame image

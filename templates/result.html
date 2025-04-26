@@ -9,6 +9,42 @@
         box-shadow: 0 5px 15px rgba(0,0,0,0.1);
         transition: all 0.3s ease;
         margin-bottom: 20px;
+        /* Fixed aspect ratio for consistent display */
+        height: 0;
+        padding-bottom: 65%; /* Increase from 60% to 65% for a bigger size */
+        max-height: 650px; /* Keep the same max-height */
+    }
+    
+    .video-container video {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: contain; /* Maintain aspect ratio with black bars if needed */
+        background-color: #000; /* Black background for letterboxing */
+    }
+    
+    /* Video player container with max height */
+    .video-players-row {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        align-items: stretch;
+        max-width: 1200px;
+        margin: 0 auto;
+    }
+    
+    .video-player-card {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        max-height: 650px; /* Increase from 500px to 600px */
+    }
+    
+    .video-player-footer {
+        margin-top: auto;
+        padding: 15px 0;
     }
     
     .video-container:hover {
@@ -25,6 +61,7 @@
         padding: 5px 10px;
         border-radius: 5px;
         font-size: 0.85rem;
+        z-index: 10;
     }
     
     .video-overlay {
@@ -42,6 +79,7 @@
         transition: opacity 0.3s;
         color: white;
         pointer-events: none;
+        z-index: 5;
     }
     
     .video-container:hover .video-overlay {
@@ -74,6 +112,23 @@
         border-radius: 10px;
         padding: 20px;
     }
+    
+    /* Responsive adjustments */
+    @media (max-width: 768px) {
+        .video-container {
+            padding-bottom: 56.25%; /* Return to standard 16:9 on mobile for better sizing */
+            max-height: none; /* Remove max height on mobile */
+        }
+        
+        .video-player-card {
+            max-height: none; /* Remove max height on mobile */
+            margin-bottom: 30px;
+        }
+        
+        h5.text-center.mb-3 {
+            font-size: 1rem; /* Smaller titles on mobile */
+        }
+    }
 </style>
 {% endblock %}
 
@@ -92,46 +147,53 @@
         <div class="comparison-container mb-4">
             <h3 class="mb-3 text-center">Output Videos</h3>
             
-            <div class="row">
+            <div class="row video-players-row">
                 <div class="col-md-6">
-                    <div class="video-container">
-                        <div class="video-tag">
-                            <i class="fas fa-crop-alt me-1"></i> Smart Cropped
+                    <div class="video-player-card">
+                        <h5 class="text-center mb-2">Smart Cropped Version</h5>
+                        <div class="video-container">
+                            <div class="video-tag">
+                                <i class="fas fa-crop-alt me-1"></i> Smart Cropped
+                            </div>
+                            <video controls">
+                                <source src="{{ url_for('video', task_id=task_id, filename=output_filename) }}" type="video/mp4">
+                                Your browser does not support the video tag.
+                            </video>
+                            <div class="video-overlay">
+                                <i class="fas fa-play-circle fa-3x"></i>
+                                <p class="mt-2">Play Smart Cropped Video</p>
+                            </div>
                         </div>
-                        <video controls class="img-fluid" poster="{{ url_for('static', filename='img/thumbnail.jpg') }}">
-                            <source src="{{ url_for('video', task_id=task_id, filename=output_filename) }}" type="video/mp4">
-                            Your browser does not support the video tag.
-                        </video>
-                        <div class="video-overlay">
-                            <i class="fas fa-play-circle fa-3x"></i>
-                            <p class="mt-2">Play Smart Cropped Video</p>
+                        <div class="text-center video-player-footer">
+                            <a href="{{ url_for('download_file', task_id=task_id, filename=output_filename) }}" class="btn btn-primary btn-sm">
+                                <i class="fas fa-download me-1"></i>Download Cropped Video
+                            </a>
                         </div>
-                    </div>
-                    <div class="text-center mb-4">
-                        <a href="{{ url_for('download_file', task_id=task_id, filename=output_filename) }}" class="btn btn-primary">
-                            <i class="fas fa-download me-2"></i>Download Cropped Video
-                        </a>
                     </div>
                 </div>
                 
                 <div class="col-md-6">
-                    <div class="video-container">
-                        <div class="video-tag">
-                            <i class="fas fa-tags me-1"></i> Annotated
+                    <div class="video-player-card">
+                        <h5 class="text-center mb-2">Annotated Version</h5>
+                        <div class="video-container">
+                            <div class="video-tag">
+                                <i class="fas fa-tags me-1"></i> Annotated
+                            </div>
+                            <!-- Removed poster attribute to not show iPhone thumbnail -->
+                            <video controls>
+                                <source src="{{ url_for('video', task_id=task_id, filename=annotated_filename) }}" type="video/mp4">
+                                Your browser does not support the video tag.
+                            </video>
+                            <div class="video-overlay">
+                                <i class="fas fa-play-circle fa-3x"></i>
+                                <p class="mt-2">Play Annotated Video</p>
+                            </div>
                         </div>
-                        <video controls class="img-fluid" poster="{{ url_for('static', filename='img/thumbnail.jpg') }}">
-                            <source src="{{ url_for('video', task_id=task_id, filename=annotated_filename) }}" type="video/mp4">
-                            Your browser does not support the video tag.
-                        </video>
-                        <div class="video-overlay">
-                            <i class="fas fa-play-circle fa-3x"></i>
-                            <p class="mt-2">Play Annotated Video</p>
+                        <div class="text-center video-player-footer">
+                            <a href="{{ url_for('download_file', task_id=task_id, filename=annotated_filename) }}" class="btn btn-secondary btn-sm">
+                                <i class="fas fa-download me-1"></i>Download Annotated Video
+                            </a>
                         </div>
-                    </div>
-                    <div class="text-center mb-4">
-                        <a href="{{ url_for('download_file', task_id=task_id, filename=annotated_filename) }}" class="btn btn-secondary">
-                            <i class="fas fa-download me-2"></i>Download Annotated Video
-                        </a>
                     </div>
                 </div>
             </div>
@@ -218,6 +280,55 @@
         video.addEventListener('pause', () => {
             container.querySelector('.video-overlay').style.opacity = 1;
         });
+    });
+
+    // Ensure videos maintain equal heights when loaded
+    document.addEventListener('DOMContentLoaded', function() {
+        const videoContainers = document.querySelectorAll('.video-container');
+        const videos = document.querySelectorAll('.video-container video');
+        
+        // Set max height for both video containers
+        function setEqualHeights() {
+            // Reset to default aspect ratio temporarily for measurement
+            videoContainers.forEach(container => {
+                container.style.height = '';
+                container.style.paddingBottom = '65%'; // Update from 60% to 65%
+            });
+            
+            // After videos load, get their natural heights
+            setTimeout(() => {
+                let maxHeight = 0;
+                videos.forEach(video => {
+                    // Consider only visible/loaded videos
+                    if (video.videoHeight > 0) {
+                        const containerWidth = video.parentElement.offsetWidth;
+                        const expectedHeight = Math.min(
+                            (containerWidth / video.videoWidth) * video.videoHeight,
+                            450 // Max height in pixels to match CSS
+                        );
+                        maxHeight = Math.max(maxHeight, expectedHeight);
+                    }
+                });
+                
+                // Apply the max height to all containers (if we found a valid height)
+                if (maxHeight > 0) {
+                    const maxHeightPercent = Math.min(maxHeight, 450); // Enforce max height
+                    videoContainers.forEach(container => {
+                        const aspectRatio = (maxHeightPercent / container.offsetWidth) * 100;
+                        container.style.paddingBottom = Math.min(aspectRatio, 65) + '%'; // Cap at 65% instead of 50%
+                    });
+                }
+            }, 500); // Short delay to ensure videos have loaded
+        }
+        
+        // Set heights initially and when videos load
+        setEqualHeights();
+        videos.forEach(video => {
+            video.addEventListener('loadedmetadata', setEqualHeights);
+        });
+        
+        // Reset on window resize
+        window.addEventListener('resize', setEqualHeights);
     });
 </script>
 {% endblock %} 
