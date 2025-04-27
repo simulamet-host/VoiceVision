@@ -174,6 +174,33 @@
         line-height: 1.5;
     }
     
+    /* Transcript search styling */
+    .transcript-search {
+        position: relative;
+    }
+    
+    .search-highlight {
+        background-color: #ffeb3b;
+        padding: 1px 2px;
+        border-radius: 2px;
+    }
+    
+    .search-active-highlight {
+        background-color: #ffc107;
+        padding: 1px 2px;
+        border-radius: 2px;
+        font-weight: bold;
+    }
+    
+    .search-results {
+        font-size: 0.8rem;
+        color: #6c757d;
+    }
+    
+    .transcript-segment.hidden {
+        display: none;
+    }
+    
     /* Log section styling */
     .log-container {
         max-height: 300px;
@@ -358,6 +385,22 @@
                                 <i class="fas fa-copy me-1"></i>Copy Text
                             </button>
                         </div>
+                    </div>
+                    
+                    <!-- Search bar for transcript -->
+                    <div class="transcript-search mb-3">
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="fas fa-search"></i></span>
+                            <input type="text" id="transcript-search" class="form-control" placeholder="Search transcript...">
+                            <button class="btn btn-outline-secondary" type="button" id="prev-match" title="Previous match (Shift+Enter)">
+                                <i class="fas fa-chevron-up"></i>
+                            </button>
+                            <button class="btn btn-outline-secondary" type="button" id="next-match" title="Next match (Enter)">
+                                <i class="fas fa-chevron-down"></i>
+                            </button>
+                            <button class="btn btn-outline-secondary" type="button" id="clear-search">Clear</button>
+                        </div>
+                        <div class="search-results mt-2" id="search-results-counter"></div>
                     </div>
                     
                     <div class="transcript-content">
@@ -822,6 +865,8 @@
                     seg.classList.remove('active');
                 });
                 this.classList.add('active');
+                
+                // Removed auto-scroll functionality
             });
         });
         
@@ -841,6 +886,8 @@
                     
                     // Add active class to current segment
                     segment.classList.add('active');
+                    
+                    // Removed auto-scroll functionality
                 }
             });
         });
@@ -874,6 +921,172 @@
                 });
             });
         }
+        
+        // Transcript search functionality
+        initializeTranscriptSearch(transcriptSegments);
+    }
+    
+    function initializeTranscriptSearch(transcriptSegments) {
+        const searchInput = document.getElementById('transcript-search');
+        const prevMatch = document.getElementById('prev-match');
+        const nextMatch = document.getElementById('next-match');
+        const clearButton = document.getElementById('clear-search');
+        const resultsCounter = document.getElementById('search-results-counter');
+        
+        if (!searchInput || !prevMatch || !nextMatch || !clearButton || !resultsCounter) return;
+        
+        let currentMatchIndex = -1;
+        let totalMatches = 0;
+        
+        // Function to handle search
+        function performSearch() {
+            const searchTerm = searchInput.value.trim().toLowerCase();
+            clearHighlights();
+            
+            if (searchTerm === '') {
+                // Show all segments if search is empty
+                transcriptSegments.forEach(segment => {
+                    segment.classList.remove('hidden');
+                });
+                resultsCounter.textContent = '';
+                currentMatchIndex = -1;
+                totalMatches = 0;
+                return;
+            }
+            
+            let matches = [];
+            let matchCount = 0;
+            
+            // Search through all segments
+            transcriptSegments.forEach(segment => {
+                const textElement = segment.querySelector('.transcript-text');
+                const text = textElement.textContent.toLowerCase();
+                
+                if (text.includes(searchTerm)) {
+                    // This segment contains the search term
+                    segment.classList.remove('hidden');
+                    
+                    // Highlight the matches
+                    const originalText = textElement.textContent;
+                    const regex = new RegExp(searchTerm, 'gi');
+                    const highlightedText = originalText.replace(regex, match => {
+                        matchCount++;
+                        matches.push({
+                            segment: segment,
+                            element: null // Will be set after DOM insertion
+                        });
+                        return `<span class="search-highlight" data-match-index="${matchCount-1}">${match}</span>`;
+                    });
+                    
+                    textElement.innerHTML = highlightedText;
+                } else {
+                    segment.classList.add('hidden');
+                }
+            });
+            
+            // Store references to the highlight elements
+            document.querySelectorAll('.search-highlight').forEach((el, i) => {
+                matches[i].element = el;
+            });
+            
+            // Update counter
+            totalMatches = matchCount;
+            currentMatchIndex = totalMatches > 0 ? 0 : -1;
+            updateMatchHighlight();
+            
+            if (totalMatches > 0) {
+                resultsCounter.textContent = `Showing ${totalMatches} match${totalMatches > 1 ? 'es' : ''}`;
+                
+                // Scroll to first match
+                if (matches.length > 0 && matches[0].element) {
+                    matches[0].element.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'center'
+                    });
+                    matches[0].element.classList.add('search-active-highlight');
+                }
+            } else {
+                resultsCounter.textContent = 'No matches found';
+            }
+        }
+        
+        // Navigate through matches
+        function navigateMatches(direction) {
+            if (totalMatches === 0) return;
+            
+            // Remove current highlight
+            document.querySelectorAll('.search-active-highlight').forEach(el => {
+                el.classList.remove('search-active-highlight');
+            });
+            
+            // Update index
+            if (direction === 'next') {
+                currentMatchIndex = (currentMatchIndex + 1) % totalMatches;
+            } else {
+                currentMatchIndex = (currentMatchIndex - 1 + totalMatches) % totalMatches;
+            }
+            
+            updateMatchHighlight();
+        }
+        
+        function updateMatchHighlight() {
+            if (currentMatchIndex >= 0) {
+                resultsCounter.textContent = `Match ${currentMatchIndex + 1} of ${totalMatches}`;
+                
+                // Find and highlight the current match
+                const currentMatch = document.querySelector(`.search-highlight[data-match-index="${currentMatchIndex}"]`);
+                if (currentMatch) {
+                    currentMatch.classList.add('search-active-highlight');
+                    currentMatch.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'center'
+                    });
+                }
+            }
+        }
+        
+        // Clear all highlights
+        function clearHighlights() {
+            transcriptSegments.forEach(segment => {
+                const textElement = segment.querySelector('.transcript-text');
+                if (textElement) {
+                    textElement.innerHTML = textElement.textContent;
+                }
+                segment.classList.remove('hidden');
+            });
+            resultsCounter.textContent = '';
+        }
+        
+        // Event listeners
+        searchInput.addEventListener('input', performSearch);
+        
+        clearButton.addEventListener('click', () => {
+            searchInput.value = '';
+            clearHighlights();
+            resultsCounter.textContent = '';
+        });
+        
+        // Add navigation button event listeners
+        prevMatch.addEventListener('click', () => {
+            navigateMatches('previous');
+        });
+        
+        nextMatch.addEventListener('click', () => {
+            navigateMatches('next');
+        });
+        
+        // Add keyboard navigation for search results
+        searchInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                if (e.shiftKey) {
+                    // Shift+Enter to go to previous match
+                    navigateMatches('previous');
+                } else {
+                    // Enter to go to next match
+                    navigateMatches('next');
+                }
+            }
+        });
     }
 </script>
 {% endblock %} 
