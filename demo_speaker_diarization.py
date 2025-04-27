@@ -3,11 +3,12 @@ import logging
 from cropper import SmartCropper, VideoAnnotator
 from components.talknet_modules.talknet_inference import SpeakerDetector
 from utils import VideoStore
+from transcriber import VideoTranscriber
 import subprocess
 
 log = logging.getLogger('aiproducer')
 
-def demo_speaker_diarization(task_id: str, video_url: str, output_path: str, target_ratio=(9, 16), min_score=0.4, crop_smoothness=0.2, progress_callback=None):
+def demo_speaker_diarization(task_id: str, video_url: str, output_path: str, target_ratio=(9, 16), min_score=0.4, crop_smoothness=0.2, enable_transcription=True, whisper_model="base", progress_callback=None):
     """Run speaker diarization demo: process video and generate cropped output.
     
     Args:
@@ -17,9 +18,11 @@ def demo_speaker_diarization(task_id: str, video_url: str, output_path: str, tar
         target_ratio: Aspect ratio as (width, height) tuple
         min_score: Minimum speaker detection confidence score (0-1)
         crop_smoothness: Smoothness of camera movement (0-1, higher is smoother)
+        enable_transcription: Whether to generate transcription using Whisper
+        whisper_model: Whisper model size to use ('tiny', 'base', 'small', 'medium', 'large')
         progress_callback: Optional callback function for progress updates
               Function signature: progress_callback(stage, progress)
-              Where stage is 'download', 'detection', or 'cropping'
+              Where stage is 'download', 'detection', 'cropping', or 'transcription'
               And progress is a float between 0 and 1
     """
     try:
@@ -70,9 +73,10 @@ def demo_speaker_diarization(task_id: str, video_url: str, output_path: str, tar
                 
             input_width = int(input_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             input_height = int(input_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            fps = int(input_cap.get(cv2.CAP_PROP_FPS))
             input_cap.release()
             
-            log.info(f"Original video dimensions: {input_width}x{input_height}")
+            log.info(f"Original video dimensions: {input_width}x{input_height}, FPS: {fps}")
             
             # Calculate target dimensions while maintaining aspect ratio
             if input_width > input_height:
@@ -93,6 +97,7 @@ def demo_speaker_diarization(task_id: str, video_url: str, output_path: str, tar
             log.warning(f"Error determining video dimensions: {str(e)}")
             # Fallback to safe scaling
             scale_filter = "scale='min(1280,iw)':'-2'"
+            fps = 30  # Default FPS
         
         downsample_cmd = [
             "ffmpeg", "-y",
@@ -144,6 +149,9 @@ def demo_speaker_diarization(task_id: str, video_url: str, output_path: str, tar
             progress_tracker=detection_progress_tracker
         )
         
+        # Add FPS to speaker data for transcription alignment
+        speaker_data['fps'] = fps
+        
         # Mark detection as complete if we have a callback
         if progress_callback:
             progress_callback('detection', 1.0)
@@ -183,6 +191,31 @@ def demo_speaker_diarization(task_id: str, video_url: str, output_path: str, tar
         annotated_output = output_path.replace('.mp4', '_annotated.mp4')
         annotator = VideoAnnotator(target_ratio=target_ratio)
         annotator.process_video(processed_video_path, annotated_output, speaker_data, min_score=min_score, crop_smoothness=crop_smoothness)
+        
+        # Generate transcription if enabled
+        transcript_data = None
+        if enable_transcription:
+            log.info("Generating transcription with Whisper...")
+            if progress_callback:
+                progress_callback('transcription', 0.0)
+                
+            # Create transcription directory
+            transcript_dir = os.path.join(os.path.dirname(output_path), "transcript")
+            os.makedirs(transcript_dir, exist_ok=True)
+            
+            # Initialize transcriber and process video
+            transcriber = VideoTranscriber(model_size=whisper_model)
+            transcript_data = transcriber.transcribe_video(
+                processed_video_path,
+                speaker_data,
+                transcript_dir,
+                task_id
+            )
+            
+            if progress_callback:
+                progress_callback('transcription', 1.0)
+                
+            log.info(f"Transcription generated: {transcript_data['json_path']}")
 
         # Complete the progress
         if progress_callback:
@@ -191,6 +224,19 @@ def demo_speaker_diarization(task_id: str, video_url: str, output_path: str, tar
         log.info(f"Demo videos generated successfully at:")
         log.info(f"  - Cropped: {output_path}")
         log.info(f"  - Annotated: {annotated_output}")
+        
+        # Return the paths and data
+        result = {
+            "output_path": output_path,
+            "annotated_path": annotated_output,
+            "speaker_data": speaker_data
+        }
+        
+        if transcript_data:
+            result["transcript_data"] = transcript_data
+            
+        return result
+        
     except Exception as e:
         log.error(f"Error in demo speaker diarization: {str(e)}")
         raise
