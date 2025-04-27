@@ -134,16 +134,33 @@
         cursor: pointer;
         transition: background-color 0.2s;
         border-left: 3px solid #dee2e6;
+        position: relative;
+    }
+    
+    /* Speaker styling for segments */
+    .transcript-segment[data-speaker="0"] {
+        border-left-color: #4a6cf7;
+    }
+    
+    .transcript-segment[data-speaker="1"] {
+        border-left-color: #e74c3c;
+    }
+    
+    .transcript-segment[data-speaker="2"] {
+        border-left-color: #2ecc71;
+    }
+    
+    .transcript-segment[data-speaker="3"] {
+        border-left-color: #f39c12;
     }
     
     .transcript-segment:hover {
         background-color: #e9ecef;
-        border-left-color: #6c757d;
     }
     
     .transcript-segment.active {
         background-color: #e8f4ff;
-        border-left-color: #0d6efd;
+        border-left-width: 5px;
     }
     
     .transcript-segment-header {
@@ -163,10 +180,30 @@
     
     .speaker-badge {
         padding: 2px 8px;
-        background-color: #4a6cf7;
-        color: white;
         border-radius: 4px;
         font-weight: 500;
+        color: white;
+    }
+    
+    /* Speaker colors */
+    .speaker-0 {
+        background-color: #4a6cf7;
+    }
+    
+    .speaker-1 {
+        background-color: #e74c3c;
+    }
+    
+    .speaker-2 {
+        background-color: #2ecc71;
+    }
+    
+    .speaker-3 {
+        background-color: #f39c12;
+    }
+    
+    .speaker-unknown {
+        background-color: #6c757d;
     }
     
     .transcript-text {
@@ -406,11 +443,24 @@
                     <div class="transcript-content">
                         {% if transcript_data and transcript_data.segments %}
                             {% for segment in transcript_data.segments %}
-                            <div class="transcript-segment" data-start="{{ segment.start }}" data-end="{{ segment.end }}">
+                            <div class="transcript-segment" data-start="{{ segment.start }}" data-end="{{ segment.end }}" data-speaker="{{ segment.speaker|default('unknown') }}">
                                 <div class="transcript-segment-header">
-                                    <span class="timestamp">{{ '%02d:%02d'|format((segment.start / 60)|int, (segment.start % 60)|int) }}</span>
-                                    {% if segment.speaker %}
-                                    <span class="speaker-badge">Speaker {{ segment.speaker }}</span>
+                                    <span class="timestamp">
+                                        <i class="fas fa-clock me-1"></i>
+                                        {{ "%02d:%02d:%02d"|format(
+                                            segment.start|int // 3600,
+                                            segment.start|int % 3600 // 60,
+                                            segment.start|int % 60
+                                        ) }}
+                                    </span>
+                                    {% if segment.speaker != None %}
+                                    <span class="speaker-badge speaker-{{ segment.speaker % 4 }}">
+                                        <i class="fas fa-user me-1"></i>Speaker {{ segment.speaker }}
+                                    </span>
+                                    {% else %}
+                                    <span class="speaker-badge speaker-unknown">
+                                        <i class="fas fa-user me-1"></i>Unknown Speaker
+                                    </span>
                                     {% endif %}
                                 </div>
                                 <div class="transcript-text">{{ segment.text }}</div>
