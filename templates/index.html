@@ -478,7 +478,8 @@
     let processingStages = {
         download: { start: null, end: null },
         detection: { start: null, end: null },
-        cropping: { start: null, end: null }
+        cropping: { start: null, end: null },
+        transcription: { start: null, end: null }
     };
     
     // Prevent default drag behaviors
@@ -706,10 +707,18 @@
     
     function processVideoUrl() {
         // Show processing directly
-        uploadContainer.style.display = 'none';
-        processingStatus.style.display = 'block';
-        processingProgressBar.style.width = '0%';
-        processingStep.textContent = 'Preparing to process video URL...';
+        if (uploadContainer) {
+            uploadContainer.style.display = 'none';
+        }
+        if (processingStatus) {
+            processingStatus.style.display = 'block';
+        }
+        if (processingProgressBar) {
+            processingProgressBar.style.width = '0%';
+        }
+        if (processingStep) {
+            processingStep.textContent = 'Preparing to process video URL...';
+        }
         
         // Update metrics panel
         updateProcessingStatus('Downloading video from URL');
@@ -728,8 +737,15 @@
                 crop_smoothness: cropSmoothness
             }),
         })
-        .then(response => response.json())
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.json();
+        })
         .then(data => {
+            console.log('Process URL response:', data);  // Debug log
+            
             if (data.error) {
                 showError(data.error);
                 return;
@@ -739,6 +755,7 @@
             processingStatusInterval = setInterval(checkProcessingStatus, 1000);
         })
         .catch(error => {
+            console.error('Process URL error:', error);  // Debug log
             showError('Error processing the video URL. Please try again.');
         });
     }
@@ -772,8 +789,19 @@
     
     function checkProcessingStatus() {
         fetch(`/status/${currentTaskId}`)
-        .then(response => response.json())
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.json();
+        })
         .then(data => {
+            console.log('Status update received:', data);  // Debug log
+            
+            if (!data) {
+                throw new Error('No data received from status check');
+            }
+
             updateProcessingUI(data);
             
             if (data.status === 'completed') {
@@ -790,37 +818,55 @@
             } else if (data.status === 'error') {
                 // Processing error
                 clearInterval(processingStatusInterval);
-                updateProcessingStatus('Error occurred');
+                updateProcessingStatus('Error: ' + (data.error || 'Unknown error occurred'));
                 showError(data.error || 'An error occurred during processing.');
             }
         })
         .catch(error => {
+            console.error('Status check error:', error);  // Debug log
             clearInterval(processingStatusInterval);
-            showError('Error checking processing status. Please try again.');
+            
+            // Only show error if it's not due to page navigation
+            if (document.visibilityState === 'visible') {
+                showError('Error checking processing status. Please try again.');
+            }
         });
     }
     
     function updateProcessingUI(data) {
         processingProgressBar.style.width = data.progress + '%';
-        
+
+        // Track stage transitions based on progress thresholds
         if (data.progress < 30) {
             processingStep.textContent = 'Downloading and preparing video...';
-            updateProcessingStatus('Downloading video');
-        } else if (data.progress < 70) {
+            if (!processingStages.download.start) {
+                startProcessingStage('download');
+                updateProcessingStatus('Downloading video');
+            }
+        } else if (data.progress >= 30 && data.progress < 60) {
             processingStep.textContent = 'Detecting and analyzing speakers...';
-            // If we're transitioning to detection stage
-            if (processingStages.download.end === null) {
+            // Transition from download to detection
+            if (processingStages.download.start && !processingStages.download.end) {
                 endProcessingStage('download');
                 startProcessingStage('detection');
                 updateProcessingStatus('Detecting speakers');
             }
-        } else {
+        } else if (data.progress >= 60 && data.progress < 80) {
             processingStep.textContent = 'Generating smart-cropped video...';
-            // If we're transitioning to cropping stage
-            if (processingStages.detection.end === null) {
+            // Transition from detection to cropping
+            if (processingStages.detection.start && !processingStages.detection.end) {
                 endProcessingStage('detection');
                 startProcessingStage('cropping');
                 updateProcessingStatus('Generating cropped video');
+            }
+        } else if (data.progress >= 80) {
+            // Handle transcription stage if present
+            if (!processingStages.cropping.end && processingStages.cropping.start) {
+                endProcessingStage('cropping');
+                if (data.progress < 100) {
+                    startProcessingStage('transcription');
+                    updateProcessingStatus('Generating transcript');
+                }
             }
         }
         
@@ -931,10 +977,20 @@
     }
     
     function showError(message) {
-        processingStatus.style.display = 'none';
-        uploadProgress.style.display = 'none';
-        errorMessage.style.display = 'block';
-        errorText.textContent = message;
+        console.log('Showing error:', message);  // Debug log
+        
+        if (processingStatus) {
+            processingStatus.style.display = 'none';
+        }
+        if (uploadProgress) {
+            uploadProgress.style.display = 'none';
+        }
+        if (errorMessage) {
+            errorMessage.style.display = 'block';
+            if (errorText) {
+                errorText.textContent = message;
+            }
+        }
         
         if (processingStatusInterval) {
             clearInterval(processingStatusInterval);
@@ -1011,54 +1067,120 @@
         processingStages = {
             download: { start: null, end: null },
             detection: { start: null, end: null },
-            cropping: { start: null, end: null }
+            cropping: { start: null, end: null },
+            transcription: { start: null, end: null }
         };
         
-        // Reset display
-        document.getElementById('downloadTime').textContent = '--';
-        document.getElementById('detectionTime').textContent = '--';
-        document.getElementById('croppingTime').textContent = '--';
-        document.getElementById('totalTime').textContent = '--';
+        // Safely reset display elements
+        const elements = {
+            'downloadTime': '--',
+            'detectionTime': '--',
+            'croppingTime': '--',
+            'transcriptionTime': '--',
+            'totalTime': '--'
+        };
+        
+        // Safely update each element if it exists
+        Object.keys(elements).forEach(id => {
+            const element = document.getElementById(id);
+            if (element) {
+                element.textContent = elements[id];
+            }
+        });
     }
     
     function startProcessingStage(stage) {
-        if (processingStages[stage]) {
+        if (processingStages[stage] && !processingStages[stage].start) {
             processingStages[stage].start = Date.now();
+            console.log(`Starting ${stage} stage at ${processingStages[stage].start}`);
         }
     }
     
     function endProcessingStage(stage) {
-        if (processingStages[stage] && processingStages[stage].start) {
-            processingStages[stage].end = Date.now();
-            const duration = (processingStages[stage].end - processingStages[stage].start) / 1000;
-            document.getElementById(`${stage}Time`).textContent = `${duration.toFixed(2)}s`;
+        try {
+            if (processingStages[stage] && processingStages[stage].start && !processingStages[stage].end) {
+                processingStages[stage].end = Date.now();
+                const duration = (processingStages[stage].end - processingStages[stage].start) / 1000;
+                
+                // Safely update the stage time display
+                const timeElement = document.getElementById(`${stage}Time`);
+                if (timeElement) {
+                    timeElement.textContent = `${duration.toFixed(2)}s`;
+                }
+                
+                console.log(`Ending ${stage} stage. Duration: ${duration.toFixed(2)}s`);
+                
+                // Update total time whenever a stage completes
+                try {
+                    updateTotalProcessingTime();
+                } catch (error) {
+                    console.error('Error in updateTotalProcessingTime:', error);
+                }
+            }
+        } catch (error) {
+            console.error(`Error ending ${stage} stage:`, error);
         }
     }
     
     function updateTotalProcessingTime() {
-        if (processingStartTime) {
-            const totalDuration = (Date.now() - processingStartTime) / 1000;
-            document.getElementById('totalTime').textContent = `${totalDuration.toFixed(2)}s`;
-            
-            // Store the metrics data for the result page
-            storeProcessingMetrics();
+        try {
+            if (processingStartTime) {
+                let totalDuration = 0;
+                
+                // Sum up completed stage durations
+                for (const stage in processingStages) {
+                    if (processingStages[stage].start && processingStages[stage].end) {
+                        totalDuration += (processingStages[stage].end - processingStages[stage].start) / 1000;
+                    }
+                }
+                
+                // Safely update the total time display
+                const totalTimeElement = document.getElementById('totalTime');
+                if (totalTimeElement) {
+                    totalTimeElement.textContent = `${totalDuration.toFixed(2)}s`;
+                }
+                
+                console.log(`Updated total processing time: ${totalDuration.toFixed(2)}s`);
+                
+                // Store the metrics data for the result page
+                try {
+                    storeProcessingMetrics();
+                } catch (error) {
+                    console.error('Error in storeProcessingMetrics:', error);
+                }
+            }
+        } catch (error) {
+            console.error('Error updating total time:', error);
         }
     }
     
     function storeProcessingMetrics() {
-        // Store all the metrics in localStorage for access on the result page
-        const metricsData = {
-            downloadTime: document.getElementById('downloadTime').textContent,
-            detectionTime: document.getElementById('detectionTime').textContent,
-            croppingTime: document.getElementById('croppingTime').textContent,
-            totalTime: document.getElementById('totalTime').textContent,
-            deviceType: document.getElementById('deviceType').textContent,
-            platformInfo: document.getElementById('platformInfo').textContent,
-            memoryUsed: document.getElementById('memoryUsed').textContent,
-            logs: JSON.parse(localStorage.getItem('processingLogs') || '[]')
-        };
-        
-        localStorage.setItem('processingMetrics', JSON.stringify(metricsData));
+        try {
+            // Safely get element values with fallbacks
+            const getElementText = (id) => {
+                const element = document.getElementById(id);
+                return element ? element.textContent : '--';
+            };
+
+            // Store all the metrics in localStorage for access on the result page
+            const metricsData = {
+                downloadTime: getElementText('downloadTime'),
+                detectionTime: getElementText('detectionTime'),
+                croppingTime: getElementText('croppingTime'),
+                transcriptionTime: getElementText('transcriptionTime'),
+                totalTime: getElementText('totalTime'),
+                deviceType: getElementText('deviceType'),
+                platformInfo: getElementText('platformInfo'),
+                memoryUsed: getElementText('memoryUsed'),
+                logs: JSON.parse(localStorage.getItem('processingLogs') || '[]')
+            };
+            
+            console.log('Storing metrics:', metricsData);  // Debug log
+            localStorage.setItem('processingMetrics', JSON.stringify(metricsData));
+        } catch (error) {
+            console.error('Error storing metrics:', error);
+            // Don't throw error - allow processing to continue
+        }
     }
     
     function storeProcessingLogs(logs) {
