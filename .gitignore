@@ -21,11 +21,7 @@ wheels/
 *.egg
 MANIFEST
 
-# Model weights (can be large)
-weights/*.model
-weights/*.pth
-*.model
-*.pth
+
 
 # Task output directories
 task/*/
