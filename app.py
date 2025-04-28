@@ -189,39 +189,47 @@ def process_url_task(task_id):
         
         # Track overall time
         start_time = time.time()
-        download_end_time = start_time
-        detection_end_time = start_time
-        cropping_end_time = start_time
+        # Initialize time tracking for each stage
+        stage_times = {
+            'download': 0,
+            'detection': 0,
+            'cropping': 0,
+            'transcription': 0
+        }
+        current_stage = None
+        stage_start_time = None
         
         # Run the diarization with progress updates
         def progress_callback(stage, progress):
-            nonlocal start_time, download_end_time, detection_end_time, cropping_end_time
+            nonlocal current_stage, stage_start_time, stage_times
+            
+            # Special case: direct time measurement from transcriber
+            if stage == 'transcription_direct_time':
+                # This is a direct time measurement in seconds, not a progress update
+                stage_times['transcription'] = progress
+                task['transcription_time'] = '%.2fs' % progress
+                return
+            
+            # If we're starting a new stage
+            if stage != current_stage:
+                # End timing for previous stage if there was one
+                if current_stage and stage_start_time:
+                    stage_duration = time.time() - stage_start_time
+                    stage_times[current_stage] = stage_duration
+                    task[f'{current_stage}_time'] = '%.2fs' % stage_duration
+                
+                # Start timing new stage
+                current_stage = stage
+                stage_start_time = time.time()
             
             if stage == 'download':
                 task['progress'] = 10 + progress * 0.2  # 10-30%
-                # Record download time when complete
-                if progress >= 0.99:
-                    download_end_time = time.time()
-                    task['download_time'] = '%.2fs' % (download_end_time - start_time)
             elif stage == 'detection':
                 task['progress'] = 30 + progress * 0.3  # 30-60%
-                # Record detection time when complete
-                if progress >= 0.99:
-                    detection_end_time = time.time()
-                    task['detection_time'] = '%.2fs' % (detection_end_time - download_end_time)
             elif stage == 'cropping':
                 task['progress'] = 60 + progress * 0.2  # 60-80%
-                # Record cropping time when complete
-                if progress >= 0.99:
-                    cropping_end_time = time.time()
-                    task['cropping_time'] = '%.2fs' % (cropping_end_time - detection_end_time)
             elif stage == 'transcription':
                 task['progress'] = 80 + progress * 0.2  # 80-100%
-                # Record transcription time when complete
-                if progress >= 0.99:
-                    transcription_end_time = time.time()
-                    task['transcription_time'] = '%.2fs' % (transcription_end_time - cropping_end_time)
-                    print(f"Transcription time recorded: {task['transcription_time']}")
         
         # Call the demo_speaker_diarization function directly with the URL
         result = demo_speaker_diarization(
@@ -246,13 +254,25 @@ def process_url_task(task_id):
         # Save speaker data for transcript association
         if result and 'speaker_data' in result:
             task['speaker_data'] = result['speaker_data']
+            
+        # Directly use the transcription time if provided in the result
+        if result and 'transcription_time' in result:
+            task['transcription_time'] = result['transcription_time']
+            print(f"Debug: Using direct transcription time from result: {result['transcription_time']}")
         
         # Update status to completed
         task['status'] = 'completed'
         task['progress'] = 100
         
-        # Calculate and store total processing time
-        task['total_time'] = '%.1fs' % (time.time() - start_time)
+        # Handle final stage timing if needed
+        if current_stage and stage_start_time:
+            stage_duration = time.time() - stage_start_time
+            stage_times[current_stage] = stage_duration
+            task[f'{current_stage}_time'] = '%.2fs' % stage_duration
+        
+        # Calculate and store total processing time as sum of individual stages
+        total_time = sum(stage_times.values())
+        task['total_time'] = '%.2fs' % total_time
         
         # Save to history
         history_data = {
@@ -319,39 +339,47 @@ def process_video_task(task_id):
         
         # Track overall time
         start_time = time.time()
-        download_end_time = start_time
-        detection_end_time = start_time
-        cropping_end_time = start_time
+        # Initialize time tracking for each stage
+        stage_times = {
+            'download': 0,
+            'detection': 0,
+            'cropping': 0,
+            'transcription': 0
+        }
+        current_stage = None
+        stage_start_time = None
         
         # Run the diarization with progress updates
         def progress_callback(stage, progress):
-            nonlocal start_time, download_end_time, detection_end_time, cropping_end_time
+            nonlocal current_stage, stage_start_time, stage_times
+            
+            # Special case: direct time measurement from transcriber
+            if stage == 'transcription_direct_time':
+                # This is a direct time measurement in seconds, not a progress update
+                stage_times['transcription'] = progress
+                task['transcription_time'] = '%.2fs' % progress
+                return
+            
+            # If we're starting a new stage
+            if stage != current_stage:
+                # End timing for previous stage if there was one
+                if current_stage and stage_start_time:
+                    stage_duration = time.time() - stage_start_time
+                    stage_times[current_stage] = stage_duration
+                    task[f'{current_stage}_time'] = '%.2fs' % stage_duration
+                
+                # Start timing new stage
+                current_stage = stage
+                stage_start_time = time.time()
             
             if stage == 'download':
                 task['progress'] = 10 + progress * 0.2  # 10-30%
-                # Record download time when complete
-                if progress >= 0.99:
-                    download_end_time = time.time()
-                    task['download_time'] = '%.2fs' % (download_end_time - start_time)
             elif stage == 'detection':
                 task['progress'] = 30 + progress * 0.3  # 30-60%
-                # Record detection time when complete
-                if progress >= 0.99:
-                    detection_end_time = time.time()
-                    task['detection_time'] = '%.2fs' % (detection_end_time - download_end_time)
             elif stage == 'cropping':
                 task['progress'] = 60 + progress * 0.2  # 60-80%
-                # Record cropping time when complete
-                if progress >= 0.99:
-                    cropping_end_time = time.time()
-                    task['cropping_time'] = '%.2fs' % (cropping_end_time - detection_end_time)
             elif stage == 'transcription':
                 task['progress'] = 80 + progress * 0.2  # 80-100%
-                # Record transcription time when complete
-                if progress >= 0.99:
-                    transcription_end_time = time.time()
-                    task['transcription_time'] = '%.2fs' % (transcription_end_time - cropping_end_time)
-                    print(f"Transcription time recorded: {task['transcription_time']}")
         
         # Call the demo_speaker_diarization function
         result = demo_speaker_diarization(
@@ -376,13 +404,25 @@ def process_video_task(task_id):
         # Save speaker data for transcript association
         if result and 'speaker_data' in result:
             task['speaker_data'] = result['speaker_data']
+            
+        # Directly use the transcription time if provided in the result
+        if result and 'transcription_time' in result:
+            task['transcription_time'] = result['transcription_time']
+            print(f"Debug: Using direct transcription time from result: {result['transcription_time']}")
         
         # Update status to completed
         task['status'] = 'completed'
         task['progress'] = 100
         
-        # Calculate and store total processing time
-        task['total_time'] = '%.1fs' % (time.time() - start_time)
+        # Handle final stage timing if needed
+        if current_stage and stage_start_time:
+            stage_duration = time.time() - stage_start_time
+            stage_times[current_stage] = stage_duration
+            task[f'{current_stage}_time'] = '%.2fs' % stage_duration
+        
+        # Calculate and store total processing time as sum of individual stages
+        total_time = sum(stage_times.values())
+        task['total_time'] = '%.2fs' % total_time
         
         # Save to history
         history_data = {
@@ -602,12 +642,34 @@ def result(task_id):
     download_time = task.get('download_time', '1.5s')
     detection_time = task.get('detection_time', '3.2s')
     cropping_time = task.get('cropping_time', '2.7s')
-    transcription_time = task.get('transcription_time', '4.3s')
     
-    # If we have transcript data but no transcription time, set a default based on logs
-    if has_transcript and (transcription_time == '-' or 'transcription_time' not in task):
-        transcription_time = '3.5s'  # Default if there's transcript data but no timing info
-        print(f"Debug: Setting default transcription time because transcript data exists but time was missing or '-'")
+    # Get transcription time with a more realistic approach instead of hardcoded value
+    transcription_time = task.get('transcription_time', None)
+    
+    # If transcription time is not available but transcript exists, try to estimate it
+    if not transcription_time and has_transcript:
+        try:
+            # Try to get video duration using cv2
+            import cv2
+            if os.path.exists(task['output_path']):
+                video_path = task['output_path']
+                cap = cv2.VideoCapture(video_path)
+                fps = cap.get(cv2.CAP_PROP_FPS)
+                frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                video_duration = frame_count / fps if fps > 0 else 0
+                cap.release()
+                
+                # Estimate transcription time based on video duration (roughly 20% of duration)
+                estimated_time = max(1.0, video_duration * 0.2)  # At least 1 second
+                transcription_time = f"{estimated_time:.2f}s"
+                print(f"Debug: Estimated transcription time based on video duration: {transcription_time}")
+            else:
+                transcription_time = '3.5s'  # Default fallback
+        except Exception as e:
+            print(f"Error estimating transcription time: {str(e)}")
+            transcription_time = '3.5s'  # Default fallback
+    elif not transcription_time:
+        transcription_time = '3.5s'  # Default fallback
     
     # Add additional diagnostic info
     print(f"Debug: Task values - has_transcript: {has_transcript}, transcription_time: {transcription_time}")
@@ -633,7 +695,23 @@ def result(task_id):
     # Log task keys to help debug speaker data availability
     print(f"Debug: Task keys: {list(task.keys())}")
     
-    total_time = task.get('total_time', '11.8s')
+    # Use stored total_time if available, otherwise calculate from individual stages
+    total_time = task.get('total_time')
+    if not total_time:
+        # Extract numeric values from time strings
+        try:
+            download_seconds = float(download_time.rstrip('s'))
+            detection_seconds = float(detection_time.rstrip('s'))
+            cropping_seconds = float(cropping_time.rstrip('s'))
+            transcription_seconds = float(transcription_time.rstrip('s'))
+            
+            # Sum all times
+            total_seconds = download_seconds + detection_seconds + cropping_seconds + transcription_seconds
+            total_time = '%.2fs' % total_seconds
+        except:
+            total_time = '11.8s'  # Fallback default
+    
+    print(f"Debug: Final total_time: {total_time}")
     
     return render_template('result.html', 
                           task_id=task_id, 

@@ -212,14 +212,22 @@ def demo_speaker_diarization(task_id: str, video_url: str, output_path: str, tar
                 task_id
             )
             
+            # If we're using the progress_callback for stage timing but also have direct timing
+            # from the transcriber, use the more accurate direct timing
+            if progress_callback and 'transcription_time' in transcript_data:
+                # Extract numeric value from the time string (e.g., "4.25s" -> 4.25)
+                try:
+                    direct_time_str = transcript_data['transcription_time']
+                    direct_time_seconds = float(direct_time_str.rstrip('s'))
+                    # Update the task with this direct timing measurement
+                    progress_callback('transcription_direct_time', direct_time_seconds)
+                except (ValueError, AttributeError) as e:
+                    log.warning(f"Could not parse direct transcription time: {e}")
+            
             if progress_callback:
                 progress_callback('transcription', 1.0)
                 
             log.info(f"Transcription generated: {transcript_data['json_path']}")
-
-        # Complete the progress
-        if progress_callback:
-            progress_callback('cropping', 1.0)
 
         log.info(f"Demo videos generated successfully at:")
         log.info(f"  - Cropped: {output_path}")
@@ -235,6 +243,10 @@ def demo_speaker_diarization(task_id: str, video_url: str, output_path: str, tar
         if transcript_data:
             result["transcript_data"] = transcript_data
             
+            # Include direct transcription time measurement if available
+            if 'transcription_time' in transcript_data:
+                result["transcription_time"] = transcript_data['transcription_time']
+                
         return result
         
     except Exception as e:

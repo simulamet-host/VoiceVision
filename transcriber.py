@@ -7,6 +7,7 @@ import whisper
 from datetime import timedelta
 import subprocess
 import tempfile
+import time
 
 log = logging.getLogger('aiproducer')
 
@@ -256,6 +257,9 @@ class VideoTranscriber:
             temp_dir = os.path.join(output_dir, "temp")
             os.makedirs(temp_dir, exist_ok=True)
             
+            # Track transcription time directly
+            transcription_start_time = time.time()
+            
             # Extract audio from video
             audio_path = os.path.join(temp_dir, f"{task_id}_audio.wav")
             audio_path = self.extract_audio(video_path, audio_path)
@@ -268,6 +272,13 @@ class VideoTranscriber:
             
             # Save transcription files
             output_files = self.save_transcription(enhanced_transcription, output_dir, task_id)
+            
+            # Calculate transcription time
+            transcription_duration = time.time() - transcription_start_time
+            log.info(f"Transcription completed in {transcription_duration:.2f} seconds")
+            
+            # Add timing information to output
+            output_files["transcription_time"] = f"{transcription_duration:.2f}s"
             
             # Add transcription data to output
             output_files["transcription"] = enhanced_transcription
