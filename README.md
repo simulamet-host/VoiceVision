@@ -15,6 +15,10 @@ An AI-powered smart interview cropping system that detects speakers in videos an
 - Speaker attribution in transcripts, linking spoken segments to detected speakers.
 - Searchable transcript interface on the results page for easy content navigation.
 
+<p align="center">
+  <img src="./vocievsion.gif" alt="VoiceVision Demo" width="500"/>
+</p>
+
 ## Application Workflow
 
 The diagram below also illustrates the integration of Automatic Speech Recognition (ASR), speaker-to-transcript attribution, and the transcript search functionality.
