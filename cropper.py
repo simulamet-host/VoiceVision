@@ -2,13 +2,119 @@ import cv2
 import numpy as np
 import subprocess
 import os
+import multiprocessing
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import json
+import platform
+import psutil
+
+# Set OpenCV to use all available CPU cores
+cv2.setNumThreads(multiprocessing.cpu_count())
+
+# OpenCV is compiled without CUDA support in this environment
+CUDA_AVAILABLE = False
+print("Using CPU-only mode for processing")
+
+class VideoProcessor:
+    @staticmethod
+    def extract_audio(input_video, output_audio):
+        """Extract audio from video file"""
+        print("Extracting audio...")
+        extract_audio_cmd = [
+            "ffmpeg", "-y",
+            "-i", input_video,
+            "-vn", "-acodec", "copy",
+            output_audio
+        ]
+        subprocess.run(extract_audio_cmd, check=True)
+        return output_audio
+    
+    @staticmethod
+    def encode_final_video(temp_video, audio_file, output_video, thread_count):
+        """Encode final video with audio using ffmpeg"""
+        print(f"Encoding final video: {output_video}")
+        reencode_cmd = [
+            "ffmpeg", "-y",
+            "-i", temp_video,
+            "-i", audio_file,
+            "-map", "0:v",
+            "-map", "1:a",
+            "-c:v", "libx264", 
+            "-crf", "23",
+            "-preset", "faster",  
+            "-pix_fmt", "yuv420p",  
+            "-c:a", "aac",
+            "-movflags", "+faststart",  
+            "-threads", str(thread_count), 
+            output_video
+        ]
+        subprocess.run(reencode_cmd, check=True)
+        return output_video
+    
+    @staticmethod
+    def calculate_batch_size(frame_width, frame_height):
+        """Calculate optimal batch size based on available memory - cross-platform compatible"""
+        try:
+            memory_info = psutil.virtual_memory()
+            total_memory_gb = memory_info.total / (1024**3)
+            available_memory_gb = memory_info.available / (1024**3)
+            
+            usable_memory_gb = min(total_memory_gb / 4, available_memory_gb / 2)
+            
+            # Calculate frame size in MB
+            frame_size_mb = (frame_width * frame_height * 3) / (1024**2)
+            
+            # Calculate batch size based on available memory
+            max_frames_in_memory = int(usable_memory_gb * 1024 / frame_size_mb)
+            batch_size = min(200, max(50, max_frames_in_memory))  # Between 50 and 200
+            
+            print(f"System memory: {total_memory_gb:.1f} GB (Available: {available_memory_gb:.1f} GB)")
+            print(f"Frame size: {frame_size_mb:.1f} MB, using batch size of {batch_size} frames")
+            
+        except Exception as e:
+            # Fallback if memory detection fails
+            print(f"Memory detection error: {e}, using default batch size")
+            batch_size = 100
+            
+        return batch_size
+    
+    @staticmethod
+    def get_video_info(input_video):
+        """Get video properties in a consistent format"""
+        cap = cv2.VideoCapture(input_video)
+        
+        if not cap.isOpened():
+            raise ValueError(f"Could not open video file: {input_video}")
+        
+        info = {
+            'width': int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+            'height': int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+            'fps': int(cap.get(cv2.CAP_PROP_FPS)),
+            'total_frames': int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        }
+        
+        cap.release()
+        print(f"Video properties - Width: {info['width']}, Height: {info['height']}, FPS: {info['fps']}")
+        return info
+    
+    @staticmethod
+    def create_temp_files(prefix):
+        """Create temp filenames with consistent naming - platform independent"""
+        temp_dir = os.path.abspath(os.path.join(".", "temp"))
+        
+        os.makedirs(temp_dir, exist_ok=True)
+        
+        temp_video = os.path.join(temp_dir, f"temp_{prefix}_no_audio.mp4")
+        audio_file = os.path.join(temp_dir, f"temp_{prefix}_audio.aac")
+        
+        return temp_video, audio_file
 
 class SmartCropper:
     def __init__(self, target_ratio=(9, 16)):
         self.target_ratio = target_ratio[0] / target_ratio[1]
         self.output_width = target_ratio[0] * 100
         self.output_height = target_ratio[1] * 100
-        self.is_phone_ratio = abs(self.target_ratio - (9/16)) < 0.1  # Check if it's close to 9:16
+        self.is_phone_ratio = abs(self.target_ratio - (9/16)) < 0.1 
         
         # Try to load iPhone frame if we're using 9:16 ratio
         self.phone_frame = None
@@ -35,6 +141,10 @@ class SmartCropper:
         self.history_size = 10
         self.smoothing_alpha = 0.2
         self.last_center = None
+        
+        # Thread count for parallel processing - limit to physical cores for better performance
+        self.thread_count = max(1, min(multiprocessing.cpu_count(), 16))  # Cap at 16 threads
+        print(f"Utilizing {self.thread_count} CPU threads for processing")
 
     def _calculate_movement(self, pos1, pos2):
         """Calculate Euclidean distance between two positions"""
@@ -203,118 +313,158 @@ class SmartCropper:
             print(f"Error applying phone overlay: {str(e)}")
             return frame
 
-    def process_video(self, input_video, output_video, speaker_data, min_score=0.5, crop_smoothness=0.2, progress_tracker=None):
+    def _process_frame(self, frame_data):
+        """Process a single frame in a worker thread"""
+        frame_idx, frame, speaker_data, frame_width, frame_height, min_score = frame_data
+        
+        # Get speaker center and track ID
+        raw_center, track_id = self._get_speaker_center(
+            speaker_data, frame_idx, frame_width, frame_height, min_score
+        )
+
+        # Handle speaker change or maintain current position
+        if raw_center is not None and track_id is not None:
+            if self.current_speaker_track_id is None:
+                # First speaker detected
+                self.current_speaker_track_id = track_id
+                center = raw_center
+                self.sticky_center = raw_center
+            elif track_id != self.current_speaker_track_id:
+                # New speaker - instant change
+                self.current_speaker_track_id = track_id
+                center = raw_center
+                self.sticky_center = raw_center  # Reset sticky position for new speaker
+            else:
+                # Same speaker - handle movement with threshold
+                center = self._handle_speaker_movement(raw_center)
+        else:
+            # No speaker detected, use last known position or default
+            center = self.sticky_center if self.sticky_center else self._get_default_center(frame_width, frame_height)
+
+        # Get and apply crop window
+        x, y, crop_w, crop_h = self._get_crop_window(frame_width, frame_height, center[0], center[1])
+        cropped = frame[y:y+crop_h, x:x+crop_w]
+        
+        # Standard CPU resize
+        resized = cv2.resize(cropped, (self.output_width, self.output_height))
+        
+        # Apply phone overlay if using 9:16 ratio
+        if self.is_phone_ratio:
+            resized = self._apply_phone_overlay(resized)
+            
+        return frame_idx, resized
+
+    def process_video(self, input_video, output_video, speaker_data, min_score=0.5, crop_smoothness=0.2, progress_tracker=None, cached_audio=None):
         # Update smoothing factor with the user's choice
         self.smoothing_alpha = crop_smoothness
         
-        cap = cv2.VideoCapture(input_video)
+        # Make sure input file exists
+        if not os.path.exists(input_video):
+            raise FileNotFoundError(f"Input video file not found: {input_video}")
         
-        # Get video properties
-        frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        fps = int(cap.get(cv2.CAP_PROP_FPS))
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
-        print(f"Video properties - Width: {frame_width}, Height: {frame_height}, FPS: {fps}")
+        # Get video info using shared utility
+        video_info = VideoProcessor.get_video_info(input_video)
+        frame_width = video_info['width']
+        frame_height = video_info['height']
+        fps = video_info['fps']
+        total_frames = video_info['total_frames']
         
         # Setup temporary files
-        temp_video = os.path.abspath("temp_no_audio.mp4")
-        audio_file = os.path.abspath("temp_audio.aac")
-
-        # Initialize video writer
+        temp_video, audio_file = VideoProcessor.create_temp_files("cropped")
+        
+        # Standard software encoding
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         out = cv2.VideoWriter(temp_video, fourcc, fps, (self.output_width, self.output_height))
         
         if not out.isOpened():
             print("Error: VideoWriter could not be opened.")
-            cap.release()
             return
 
+        # Get optimal batch size based on memory
+        batch_size = VideoProcessor.calculate_batch_size(frame_width, frame_height)
+
+        # Read and process frames in batches to avoid memory issues
         frame_idx = 0
-
+        total_processed = 0
+        
+        cap = cv2.VideoCapture(input_video)
+        
         while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
-
-            # Get speaker center and track ID
-            raw_center, track_id = self._get_speaker_center(
-                speaker_data, frame_idx, frame_width, frame_height, min_score
-            )
-
-            # Handle speaker change or maintain current position
-            if raw_center is not None and track_id is not None:
-                if self.current_speaker_track_id is None:
-                    # First speaker detected
-                    self.current_speaker_track_id = track_id
-                    center = raw_center
-                    self.sticky_center = raw_center
-                elif track_id != self.current_speaker_track_id:
-                    # New speaker - instant change
-                    self.current_speaker_track_id = track_id
-                    center = raw_center
-                    self.sticky_center = raw_center  # Reset sticky position for new speaker
-                else:
-                    # Same speaker - handle movement with threshold
-                    center = self._handle_speaker_movement(raw_center)
-            else:
-                # No speaker detected, use last known position or default
-                center = self.sticky_center if self.sticky_center else self._get_default_center(frame_width, frame_height)
-
-            # Get and apply crop window
-            x, y, crop_w, crop_h = self._get_crop_window(frame_width, frame_height, center[0], center[1])
-            cropped = frame[y:y+crop_h, x:x+crop_w]
-            resized = cv2.resize(cropped, (self.output_width, self.output_height))
+            # Read batch of frames
+            frames_to_process = []
+            batch_start_idx = frame_idx
             
-            # Apply phone overlay if using 9:16 ratio
-            if self.is_phone_ratio:
-                resized = self._apply_phone_overlay(resized)
+            for _ in range(batch_size):
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                frames_to_process.append((frame_idx, frame, speaker_data, frame_width, frame_height, min_score))
+                frame_idx += 1
                 
-            out.write(resized)
-
-            frame_idx += 1
+                if frame_idx % 100 == 0:
+                    print(f"Read {frame_idx}/{total_frames} frames")
             
-            # Update progress tracker if provided
-            if progress_tracker and frame_idx % 10 == 0:
-                progress_tracker.update(frame_idx)
+            if not frames_to_process:
+                break  # No more frames to process
                 
-            if frame_idx % 100 == 0:
-                print(f"Processed {frame_idx}/{total_frames} frames")
-
+            # Process the batch in parallel
+            print(f"Processing batch of {len(frames_to_process)} frames...")
+            processed_frames = {}
+            
+            with ThreadPoolExecutor(max_workers=self.thread_count) as executor:
+                future_to_frame = {executor.submit(self._process_frame, frame_data): frame_data for frame_data in frames_to_process}
+                
+                for future in as_completed(future_to_frame):
+                    try:
+                        idx, processed_frame = future.result()
+                        processed_frames[idx] = processed_frame
+                        
+                        # Update progress tracker if provided
+                        if progress_tracker and idx % 10 == 0:
+                            progress_tracker.update(idx)
+                    except Exception as exc:
+                        print(f'Frame processing generated an exception: {exc}')
+            
+            # Write processed frames in order
+            for i in range(batch_start_idx, batch_start_idx + len(frames_to_process)):
+                if i in processed_frames:
+                    out.write(processed_frames[i])
+                    total_processed += 1
+                    
+                    if total_processed % 100 == 0:
+                        print(f"Processed {total_processed}/{total_frames} frames")
+            
+            # Clear memory
+            processed_frames.clear()
+            frames_to_process.clear()
+        
         cap.release()
         out.release()
 
-        # Handle audio and final encoding
-        extract_audio_cmd = [
-            "ffmpeg", "-y",
-            "-i", input_video,
-            "-vn", "-acodec", "copy",
-            audio_file
-        ]
-        subprocess.run(extract_audio_cmd, check=True)
-
-        # Create the final encoded video directly to the expected output path
-        reencode_cmd = [
-            "ffmpeg", "-y",
-            "-i", temp_video,
-            "-i", audio_file,
-            "-map", "0:v",
-            "-map", "1:a",
-            "-c:v", "libx264", 
-            "-crf", "23",
-            "-pix_fmt", "yuv420p",  # Ensure browser compatibility
-            "-c:a", "aac",
-            "-movflags", "+faststart",  # Enable streaming
-            output_video  # Use the exact output path provided
-        ]
-        subprocess.run(reencode_cmd, check=True)
+        # Extract audio only if we don't already have it cached
+        if cached_audio and os.path.exists(cached_audio):
+            print(f"Using cached audio from: {cached_audio}")
+            audio_file = cached_audio
+        else:
+            audio_file = VideoProcessor.extract_audio(input_video, audio_file)
+        
+        # Make sure output directory exists
+        output_dir = os.path.dirname(os.path.abspath(output_video))
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Create the final encoded video using shared encoder
+        VideoProcessor.encode_final_video(temp_video, audio_file, output_video, self.thread_count)
 
         # Cleanup
-        os.remove(temp_video)
-        os.remove(audio_file)
+        if os.path.exists(temp_video):
+            os.remove(temp_video)
+        
+        # Don't remove audio file if it was cached
+        if (not cached_audio or cached_audio != audio_file) and os.path.exists(audio_file):
+            os.remove(audio_file)
 
         print(f"Processing complete: {output_video}")
-
+        return audio_file  # Return audio file path in case it's needed for caching
 
 class VideoAnnotator:
     def __init__(self, target_ratio=(9, 16)):
@@ -348,6 +498,10 @@ class VideoAnnotator:
         self.processing_height = None
         self.original_width = None
         self.original_height = None
+        
+        # Thread count for parallel processing - limit to physical cores for better performance
+        self.thread_count = max(1, min(multiprocessing.cpu_count(), 16))  # Cap at 16 threads
+        print(f"Utilizing {self.thread_count} CPU threads for annotation")
 
     def _calculate_movement(self, pos1, pos2):
         """Calculate Euclidean distance between two positions"""
@@ -592,10 +746,55 @@ class VideoAnnotator:
                 # If phone frame overlay fails, just leave the rectangle
                 print(f"Error applying phone frame: {e}")
 
-    def process_video(self, input_video, output_video, speaker_data, min_score=0.5, crop_smoothness=0.2, progress_tracker=None):
+    def _process_annotation_frame(self, frame_data):
+        """Process a single annotation frame in a worker thread"""
+        frame_idx, frame, speaker_data, output_width, output_height, min_score = frame_data
+        
+        # Standard CPU resize
+        frame = cv2.resize(frame, (output_width, output_height))
+        
+        # Get all active speakers and their data for this frame
+        active_speakers, silent_speakers, best_speaker = self._get_speaker_data(
+            speaker_data, frame_idx, output_width, output_height, min_score
+        )
+        
+        # Find the most likely speaker
+        max_score = -1
+        main_speaker = None
+        main_speaker_id = None
+        for speaker in active_speakers:
+            if speaker['score'] > max_score:
+                max_score = speaker['score']
+                main_speaker_id = speaker['track_id']
+                main_speaker = speaker
+        
+        # Draw boxes around all tracked faces
+        for speaker in active_speakers:
+            is_main = (speaker['track_id'] == main_speaker_id)
+            self._draw_speaker_box(frame, speaker['bbox'], speaker['score'] > min_score, speaker['track_id'], is_main)
+        
+        # Draw silent speakers
+        for speaker in silent_speakers:
+            self._draw_speaker_box(frame, speaker['bbox'], False, speaker['track_id'], False)
+        
+        # Calculate crop window
+        if main_speaker is not None:
+            center = self._handle_speaker_movement(main_speaker['center'])
+            
+            # Add crop window overlay
+            crop_x, crop_y, crop_w, crop_h = self._calculate_crop_window(output_width, output_height, center)
+            self._overlay_phone_frame(frame, crop_x, crop_y, crop_w, crop_h)
+        
+        return frame_idx, frame
+
+    def process_video(self, input_video, output_video, speaker_data, min_score=0.5, crop_smoothness=0.2, progress_tracker=None, cached_audio=None):
         # Update smoothing factor with the user's choice
         self.smoothing_alpha = crop_smoothness
         
+        # Make sure input file exists
+        if not os.path.exists(input_video):
+            raise FileNotFoundError(f"Input video file not found: {input_video}")
+            
         # Load the iPhone frame image
         try:
             iphone_frame = cv2.imread("iphone.png", cv2.IMREAD_UNCHANGED)
@@ -605,15 +804,12 @@ class VideoAnnotator:
             print(f"Error loading iPhone frame: {e}")
             iphone_frame = None
             
-        cap = cv2.VideoCapture(input_video)
-        
-        # Get video properties
-        frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        fps = int(cap.get(cv2.CAP_PROP_FPS))
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        
-        print(f"Annotator - Input video dimensions: {frame_width}x{frame_height}")
+        # Get video info using shared utility
+        video_info = VideoProcessor.get_video_info(input_video)
+        frame_width = video_info['width']
+        frame_height = video_info['height']
+        fps = video_info['fps']
+        total_frames = video_info['total_frames']
         
         # Store dimensions for accurate bounding box mapping
         self.processing_width = frame_width
@@ -641,104 +837,155 @@ class VideoAnnotator:
         print(f"Annotator - Output dimensions: {output_width}x{output_height}")
             
         # Setup temporary files
-        temp_video = os.path.abspath("temp_annotated_no_audio.mp4")
-        audio_file = os.path.abspath("temp_annotated_audio.aac")
+        temp_video, audio_file = VideoProcessor.create_temp_files("annotated")
 
-        # Initialize video writer
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         out = cv2.VideoWriter(temp_video, fourcc, fps, (output_width, output_height))
         
         if not out.isOpened():
             print("Error: VideoWriter could not be opened.")
-            cap.release()
             return
 
+        # Get optimal batch size based on memory
+        batch_size = VideoProcessor.calculate_batch_size(frame_width, frame_height)
+
+        # Read and process frames in batches
         frame_idx = 0
-        main_speaker_id = None
+        total_processed = 0
         
-        # Process each frame
+        cap = cv2.VideoCapture(input_video)
+        
         while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
+            # Read batch of frames
+            frames_to_process = []
+            batch_start_idx = frame_idx
+            
+            for _ in range(batch_size):
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                frames_to_process.append((frame_idx, frame, speaker_data, output_width, output_height, min_score))
+                frame_idx += 1
                 
-            # Resize the frame to output dimensions
-            frame = cv2.resize(frame, (output_width, output_height))
+                if frame_idx % 100 == 0:
+                    print(f"Read {frame_idx}/{total_frames} frames for annotation")
             
-            # Get all active speakers and their data for this frame
-            active_speakers, silent_speakers, best_speaker = self._get_speaker_data(
-                speaker_data, frame_idx, output_width, output_height, min_score
-            )
-            
-            # Find the most likely speaker
-            max_score = -1
-            main_speaker = None
-            for speaker in active_speakers:
-                if speaker['score'] > max_score:
-                    max_score = speaker['score']
-                    main_speaker_id = speaker['track_id']
-                    main_speaker = speaker
-            
-            # Draw boxes around all tracked faces
-            for speaker in active_speakers:
-                is_main = (speaker['track_id'] == main_speaker_id)
-                self._draw_speaker_box(frame, speaker['bbox'], speaker['score'] > min_score, speaker['track_id'], is_main)
-            
-            # Draw silent speakers
-            for speaker in silent_speakers:
-                self._draw_speaker_box(frame, speaker['bbox'], False, speaker['track_id'], False)
-            
-            # Calculate crop window
-            if main_speaker is not None:
-                center = self._handle_speaker_movement(main_speaker['center'])
+            if not frames_to_process:
+                break 
                 
-                # Add crop window overlay
-                crop_x, crop_y, crop_w, crop_h = self._calculate_crop_window(output_width, output_height, center)
-                self._overlay_phone_frame(frame, crop_x, crop_y, crop_w, crop_h)
+            # Process the batch in parallel
+            print(f"Annotating batch of {len(frames_to_process)} frames...")
+            processed_frames = {}
             
-            # Write the frame
-            out.write(frame)
-            
-            frame_idx += 1
-            
-            # Update progress tracker if provided
-            if progress_tracker and frame_idx % 10 == 0:
-                progress_tracker.update(frame_idx)
+            with ThreadPoolExecutor(max_workers=self.thread_count) as executor:
+                future_to_frame = {executor.submit(self._process_annotation_frame, frame_data): frame_data for frame_data in frames_to_process}
                 
-            if frame_idx % 100 == 0:
-                print(f"Annotated {frame_idx}/{total_frames} frames")
+                for future in as_completed(future_to_frame):
+                    try:
+                        idx, processed_frame = future.result()
+                        processed_frames[idx] = processed_frame
+                        
+                        # Update progress tracker if provided
+                        if progress_tracker and idx % 10 == 0:
+                            progress_tracker.update(idx)
+                    except Exception as exc:
+                        print(f'Frame annotation generated an exception: {exc}')
+            
+            # Write processed frames in order
+            for i in range(batch_start_idx, batch_start_idx + len(frames_to_process)):
+                if i in processed_frames:
+                    out.write(processed_frames[i])
+                    total_processed += 1
+                    
+                    if total_processed % 100 == 0:
+                        print(f"Annotated {total_processed}/{total_frames} frames")
+            
+            # Clear memory
+            processed_frames.clear()
+            frames_to_process.clear()
                 
         # Clean up
         cap.release()
         out.release()
 
-        # Extract audio from original video
-        extract_audio_cmd = [
-            "ffmpeg", "-y",
-            "-i", input_video,
-            "-vn", "-acodec", "copy",
-            audio_file
-        ]
-        subprocess.run(extract_audio_cmd, check=True)
+        if cached_audio and os.path.exists(cached_audio):
+            print(f"Using cached audio from: {cached_audio}")
+            audio_file = cached_audio
+        else:
+            audio_file = VideoProcessor.extract_audio(input_video, audio_file)
+        
+        output_dir = os.path.dirname(os.path.abspath(output_video))
+        os.makedirs(output_dir, exist_ok=True)
 
-        # Create the final encoded video using FFmpeg with web-compatible settings
-        reencode_cmd = [
-            "ffmpeg", "-y",
-            "-i", temp_video,
-            "-i", audio_file,
-            "-map", "0:v",
-            "-map", "1:a",
-            "-c:v", "libx264", 
-            "-crf", "23",
-            "-pix_fmt", "yuv420p",  # Ensure browser compatibility
-            "-c:a", "aac",
-            "-movflags", "+faststart",  # Enable streaming
-            output_video
-        ]
-        subprocess.run(reencode_cmd, check=True)
+        VideoProcessor.encode_final_video(temp_video, audio_file, output_video, self.thread_count)
 
         # Cleanup
-        os.remove(temp_video)
-        os.remove(audio_file)
+        if os.path.exists(temp_video):
+            os.remove(temp_video)
+        
+        if (not cached_audio or cached_audio != audio_file) and os.path.exists(audio_file):
+            os.remove(audio_file)
 
         print(f"Annotated video saved to {output_video}")
+        return audio_file 
+
+def process_videos(input_video, output_cropped, output_annotated, speaker_data, min_score=0.5, crop_smoothness=0.2, progress_tracker=None):
+    """Process both cropped and annotated versions in one pass, sharing resources"""
+    print(f"Processing input video: {input_video}")
+    print(f"Generating cropped output: {output_cropped}")
+    print(f"Generating annotated output: {output_annotated}")
+    
+    if not os.path.exists(input_video):
+        raise FileNotFoundError(f"Input video file not found: {input_video}")
+    
+    # Create output directories if they don't exist
+    os.makedirs(os.path.dirname(os.path.abspath(output_cropped)), exist_ok=True)
+    os.makedirs(os.path.dirname(os.path.abspath(output_annotated)), exist_ok=True)
+    
+    # Initialize processors
+    cropper = SmartCropper()
+    annotator = VideoAnnotator()
+    
+    # Create a dedicated temp directory
+    temp_dir = os.path.abspath(os.path.join(".", "temp"))
+    os.makedirs(temp_dir, exist_ok=True)
+    
+    try:
+        print("== STEP 1: Generating cropped version ==")
+        audio_file = cropper.process_video(
+            input_video, 
+            output_cropped, 
+            speaker_data, 
+            min_score, 
+            crop_smoothness, 
+            progress_tracker
+        )
+        
+        print("== STEP 2: Generating annotated version ==")
+        annotator.process_video(
+            input_video, 
+            output_annotated, 
+            speaker_data, 
+            min_score, 
+            crop_smoothness, 
+            progress_tracker,
+            cached_audio=audio_file 
+        )
+        
+        # Clean up shared resources
+        if os.path.exists(audio_file):
+            os.remove(audio_file)
+            
+        print("Both videos processed successfully!")
+        return output_cropped, output_annotated
+        
+    except Exception as e:
+        print(f"Error during video processing: {e}")
+        # Clean up any temporary files on error
+        for file in os.listdir(temp_dir):
+            if file.startswith("temp_"):
+                try:
+                    os.remove(os.path.join(temp_dir, file))
+                except:
+                    pass
+        raise
