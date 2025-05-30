@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import platform
 import psutil
+import time
 
 # Set OpenCV to use all available CPU cores
 cv2.setNumThreads(multiprocessing.cpu_count())
@@ -33,6 +34,7 @@ class VideoProcessor:
     def encode_final_video(temp_video, audio_file, output_video, thread_count):
         """Encode final video with audio using ffmpeg"""
         print(f"Encoding final video: {output_video}")
+        
         reencode_cmd = [
             "ffmpeg", "-y",
             "-i", temp_video,
@@ -44,6 +46,9 @@ class VideoProcessor:
             "-preset", "faster",  
             "-pix_fmt", "yuv420p",  
             "-c:a", "aac",
+            "-af", "aresample=async=1000",  
+            "-vsync", "cfr",  
+            "-shortest",
             "-movflags", "+faststart",  
             "-threads", str(thread_count), 
             output_video
@@ -369,10 +374,29 @@ class SmartCropper:
         fps = video_info['fps']
         total_frames = video_info['total_frames']
         
+        # Get exact fps from ffprobe for more accurate frame timing
+        try:
+            probe_cmd = [
+                "ffprobe",
+                "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=r_frame_rate",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                input_video
+            ]
+            fps_str = subprocess.check_output(probe_cmd, text=True).strip()
+            if '/' in fps_str:
+                num, den = map(int, fps_str.split('/'))
+                exact_fps = num / den if den != 0 else fps
+                print(f"Exact FPS from source: {exact_fps}")
+                fps = exact_fps
+        except Exception as e:
+            print(f"Warning: Could not get exact FPS from source: {e}")
+        
         # Setup temporary files
         temp_video, audio_file = VideoProcessor.create_temp_files("cropped")
         
-        # Standard software encoding
+        # Standard software encoding - ensure we use the exact same FPS
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         out = cv2.VideoWriter(temp_video, fourcc, fps, (self.output_width, self.output_height))
         
@@ -386,8 +410,13 @@ class SmartCropper:
         # Read and process frames in batches to avoid memory issues
         frame_idx = 0
         total_processed = 0
+        frames_skipped = 0
         
         cap = cv2.VideoCapture(input_video)
+        
+        # Set opencv capture to use exact fps
+        cap.set(cv2.CAP_PROP_FPS, fps)
+        start_time = time.time()
         
         while True:
             # Read batch of frames
@@ -432,11 +461,26 @@ class SmartCropper:
                     total_processed += 1
                     
                     if total_processed % 100 == 0:
-                        print(f"Processed {total_processed}/{total_frames} frames")
+                        elapsed = time.time() - start_time
+                        fps_achieved = total_processed / elapsed if elapsed > 0 else 0
+                        print(f"Processed {total_processed}/{total_frames} frames (Current FPS: {fps_achieved:.2f})")
+                else:
+                    frames_skipped += 1
             
             # Clear memory
             processed_frames.clear()
             frames_to_process.clear()
+        
+        end_time = time.time()
+        total_time = end_time - start_time
+        achieved_fps = total_processed / total_time if total_time > 0 else 0
+        
+        print(f"Video processing stats:")
+        print(f"- Total frames processed: {total_processed}")
+        print(f"- Total frames skipped: {frames_skipped}")
+        print(f"- Processing time: {total_time:.2f}s")
+        print(f"- Achieved FPS: {achieved_fps:.2f}")
+        print(f"- Target FPS: {fps:.2f}")
         
         cap.release()
         out.release()
@@ -811,6 +855,25 @@ class VideoAnnotator:
         fps = video_info['fps']
         total_frames = video_info['total_frames']
         
+        # Get exact fps from ffprobe for more accurate frame timing
+        try:
+            probe_cmd = [
+                "ffprobe",
+                "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=r_frame_rate",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                input_video
+            ]
+            fps_str = subprocess.check_output(probe_cmd, text=True).strip()
+            if '/' in fps_str:
+                num, den = map(int, fps_str.split('/'))
+                exact_fps = num / den if den != 0 else fps
+                print(f"Exact FPS from source: {exact_fps}")
+                fps = exact_fps
+        except Exception as e:
+            print(f"Warning: Could not get exact FPS from source: {e}")
+        
         # Store dimensions for accurate bounding box mapping
         self.processing_width = frame_width
         self.processing_height = frame_height
@@ -852,8 +915,15 @@ class VideoAnnotator:
         # Read and process frames in batches
         frame_idx = 0
         total_processed = 0
+        frames_skipped = 0
         
         cap = cv2.VideoCapture(input_video)
+        
+        # Set opencv capture to use exact fps
+        cap.set(cv2.CAP_PROP_FPS, fps)
+        
+        # Track frame processing times for stats
+        start_time = time.time()
         
         while True:
             # Read batch of frames
@@ -898,13 +968,28 @@ class VideoAnnotator:
                     total_processed += 1
                     
                     if total_processed % 100 == 0:
-                        print(f"Annotated {total_processed}/{total_frames} frames")
+                        elapsed = time.time() - start_time
+                        fps_achieved = total_processed / elapsed if elapsed > 0 else 0
+                        print(f"Annotated {total_processed}/{total_frames} frames (Current FPS: {fps_achieved:.2f})")
+                else:
+                    frames_skipped += 1
             
             # Clear memory
             processed_frames.clear()
             frames_to_process.clear()
                 
         # Clean up
+        end_time = time.time()
+        total_time = end_time - start_time
+        achieved_fps = total_processed / total_time if total_time > 0 else 0
+        
+        print(f"Annotation stats:")
+        print(f"- Total frames processed: {total_processed}")
+        print(f"- Total frames skipped: {frames_skipped}")
+        print(f"- Processing time: {total_time:.2f}s")
+        print(f"- Achieved FPS: {achieved_fps:.2f}")
+        print(f"- Target FPS: {fps:.2f}")
+        
         cap.release()
         out.release()
 
@@ -927,7 +1012,7 @@ class VideoAnnotator:
             os.remove(audio_file)
 
         print(f"Annotated video saved to {output_video}")
-        return audio_file 
+        return audio_file
 
 def process_videos(input_video, output_cropped, output_annotated, speaker_data, min_score=0.5, crop_smoothness=0.2, progress_tracker=None):
     """Process both cropped and annotated versions in one pass, sharing resources"""
