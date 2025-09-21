@@ -1,4 +1,4 @@
-# VoiceVision
+# VoiceVision: AI-Powered Speaker-Aware Cropping and Content Indexing for Multi-Speaker Videos
 
 An AI-powered smart interview cropping system that detects speakers in videos and automatically focuses on whoever is actively speaking. VoiceVision uses advanced speaker diarization with TalkNet to create perfectly framed videos optimized for social media and presentations. It further enhances videos by generating accurate transcriptions using Whisper ASR, attributing speech segments to the identified speakers, and providing a searchable transcript interface.
 
