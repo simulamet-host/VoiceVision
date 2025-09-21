@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+  - family-names: "Houshmand Sarkhoosh"
+    given-names: "Mehdi"
+title: "VoiceVision: AI-Powered Speaker-Aware Cropping and Content Indexing for Multi-Speaker Videos"
+version: "1.0.0"
+doi: "..."
+date-released: 2025-10-21
+url: "https://github.com/simulamet-host/VoiceVision"
