@@ -175,7 +175,7 @@ Make sure these host directories exist, or Docker might create them with root ow
 
 1. Clone this repository:
    ```
-   git clone https://github.com/mehdih7/VoiceVision.git
+   git clone https://github.com/simulamet-host/VoiceVision.git
    cd VoiceVision
    ```
 
